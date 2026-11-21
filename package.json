@@ -1,0 +1,18 @@
+{
+  "name": "beatbar-studio",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "format": "prettier --write frontend",
+    "check": "node --check frontend/app.js && prettier --check frontend"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "agent-browser"
+    ]
+  },
+  "devDependencies": {
+    "agent-browser": "0.21.0",
+    "prettier": "3.6.2"
+  }
+}

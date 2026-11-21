@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BeatBar Studio · 节奏可视化工作台</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/"
+        ><span class="brand-icon">▥</span> BeatBar<span class="brand-light"
+          >STUDIO</span
+        ></a
+      ><span class="workspace-label">节奏可视化工作台</span>
+      <div class="header-actions">
+        <span id="connection" class="status-dot">连接中</span
+        ><button id="helpBtn" class="quiet">⌘ 快捷键</button
+        ><button id="saveProject">保存项目</button
+        ><label class="button quiet"
+          >打开项目<input id="projectFile" type="file" accept=".json" hidden
+        /></label>
+      </div>
+    </header>
+    <main>
+      <div class="page-title">
+        <div>
+          <div class="eyebrow">YOUR VIDEO. YOUR RHYTHM.</div>
+          <h1>让每一拍，都看得见<span>.</span></h1>
+          <p>从音乐中提取节奏，用你的方式重新编排。</p>
+        </div>
+        <button class="primary" id="openExport">↗ 导出视频</button>
+      </div>
+      <div class="studio-grid">
+        <aside class="panel source-panel">
+          <div class="panel-heading">
+            <h2><span class="section-number">01</span> 媒体与节奏</h2>
+            <span class="tiny-label">SOURCE</span>
+          </div>
+          <label id="dropzone" class="dropzone"
+            ><input
+              id="videoFile"
+              type="file"
+              accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.mp4,.mov,.avi,.webm,.mkv"
+              hidden
+            /><span class="upload-icon">↥</span
+            ><strong id="uploadTitle">拖入音频或视频，开始创作</strong
+            ><span id="uploadHint">单独上传音乐，或导入带音轨的视频</span
+            ><small>MP3 · WAV · M4A · MP4 · MOV · WEBM · MKV</small></label
+          >
+          <div id="mediaInfo" class="media-info" hidden></div>
+          <div class="segmented" id="inputTabs">
+            <button class="active" data-tab="auto">自动识别</button
+            ><button data-tab="manual">手动打点</button>
+          </div>
+          <section id="autoPanel">
+            <div class="field-head">
+              <label for="sensitivity">识别灵敏度</label
+              ><output id="sensitivityValue">55</output>
+            </div>
+            <input id="sensitivity" type="range" min="1" max="100" value="55" />
+            <div class="range-ends">
+              <span>更少、更强的鼓点</span><span>更多细节</span>
+            </div>
+            <label class="field-label" for="band">检测频段</label
+            ><select id="band">
+              <option value="40,3000">综合节奏 · 40–3000 Hz</option>
+              <option value="40,250">低频鼓点 · 40–250 Hz</option>
+              <option value="250,3000">中频敲击 · 250–3000 Hz</option>
+              <option value="3000,8000">高频踩镲 · 3000–8000 Hz</option>
+            </select>
+            <div class="field-head">
+              <label for="minInterval">最小拍点间隔</label
+              ><span
+                ><input
+                  id="minInterval"
+                  type="number"
+                  min="0.08"
+                  max="2"
+                  step="0.01"
+                  value="0.20"
+                  class="inline-number"
+                />
+                秒</span
+              >
+            </div>
+            <button id="analyze" class="primary full">
+              ✧ 分析音乐，生成拍点
+            </button>
+            <p class="field-note">
+              基于频谱变化与起音峰值检测。复杂混音建议识别后手动校准。
+            </p>
+          </section>
+          <section id="manualPanel" hidden>
+            <p class="field-note">
+              播放视频，跟着音乐按
+              <kbd>F</kbd> 或下方按钮。开启录制后每次按下都会添加拍点。
+            </p>
+            <button id="recordBtn" class="full">● 开启打点录制</button
+            ><button id="tapBtn" class="tap-button">
+              打下这一拍 <kbd>F</kbd>
+            </button>
+            <div class="field-head">
+              <label for="latency">打点时间补偿</label
+              ><span
+                ><input
+                  id="latency"
+                  class="inline-number"
+                  type="number"
+                  min="-1000"
+                  max="1000"
+                  step="10"
+                  value="0"
+                />
+                ms</span
+              >
+            </div>
+            <p class="field-note">负数提前拍点，用于补偿反应延迟。</p>
+          </section>
+          <div class="divider"></div>
+          <div class="field-head">
+            <h3>等距节拍填充</h3>
+            <span class="badge">BPM GRID</span>
+          </div>
+          <div class="input-row">
+            <label
+              >BPM<input
+                id="bpm"
+                type="number"
+                min="20"
+                max="400"
+                value="120" /></label
+            ><label
+              >起始 / 秒<input
+                id="fillStart"
+                type="number"
+                min="0"
+                value="0"
+                step="0.1" /></label
+            ><label
+              >结束 / 秒<input
+                id="fillEnd"
+                type="number"
+                min="0"
+                value="10"
+                step="0.1"
+            /></label>
+          </div>
+          <button id="fillBeats" class="full">＋ 填充选定时段</button>
+        </aside>
+        <section class="center-column">
+          <div class="panel preview-panel">
+            <div class="panel-heading">
+              <h2><span class="section-number">02</span> 实时预览</h2>
+              <select id="previewMode" aria-label="预览背景">
+                <option value="composite">素材合成</option>
+                <option value="green">绿幕背景</option>
+                <option value="transparent">透明背景</option>
+              </select>
+            </div>
+            <div id="stage" class="stage">
+              <video id="video" playsinline preload="metadata"></video>
+              <div id="audioVisual" class="audio-visual" aria-hidden="true">
+                <span class="audio-visual-label">AUDIO SESSION</span>
+                <div class="audio-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <span>纯音乐模式 · 节奏画布</span>
+              </div>
+              <audio id="audio" preload="metadata" hidden></audio>
+              <canvas id="overlay"></canvas>
+              <div id="emptyPreview">
+                <div class="empty-symbol">▥</div>
+                <h3>把节奏带进画面</h3>
+                <p>上传音乐或视频，在这里预览你的 BeatBar</p>
+                <span class="demo-pill">本地处理 · 无需上传云端</span>
+              </div>
+              <span class="preview-corner">LIVE PREVIEW</span>
+            </div>
+            <div class="transport">
+              <button id="playBtn" class="play" aria-label="播放或暂停">
+                ▶</button
+              ><button id="frameBack" title="上一帧">Ⅰ‹</button
+              ><button id="frameNext" title="下一帧">›Ⅰ</button
+              ><span id="timeDisplay" class="time-display"
+                >00:00.000 <span>/ 00:00.000</span></span
+              >
+              <div class="transport-right">
+                <label class="check-label"
+                  ><input id="metronome" type="checkbox" />节拍提示音</label
+                ><select id="playbackRate" aria-label="播放速度">
+                  <option value="0.5">0.5×</option>
+                  <option value="0.75">0.75×</option>
+                  <option value="1" selected>1.0×</option>
+                  <option value="1.25">1.25×</option>
+                  <option value="1.5">1.5×</option>
+                  <option value="2">2.0×</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="panel timeline-panel">
+            <div class="panel-heading">
+              <h2>
+                <span class="section-number">03</span> 节奏时间轴
+                <span id="beatCount" class="count-badge">0 拍</span>
+              </h2>
+              <div class="timeline-tools">
+                <button id="undo" title="撤销 Ctrl+Z">↶</button
+                ><button id="redo" title="重做 Ctrl+Shift+Z">↷</button
+                ><button id="zoomOut" title="缩小">−</button
+                ><span id="zoomLabel">1×</span
+                ><button id="zoomIn" title="放大">＋</button>
+              </div>
+            </div>
+            <div class="timeline-scroll" id="timelineScroll">
+              <canvas
+                id="timeline"
+                aria-label="节奏时间轴，点击定位，双击添加，拖动调整拍点"
+                tabindex="0"
+              ></canvas>
+            </div>
+            <div class="timeline-footer">
+              <span
+                ><i class="legend-wave"></i> 音频波形
+                <i class="legend-beat"></i> 节奏拍点</span
+              ><span>双击添加 · 拖动调整 · Delete 删除</span>
+            </div>
+            <div class="selection-editor">
+              <span id="selectedLabel">未选择拍点</span
+              ><label
+                >时间
+                <input
+                  id="beatTime"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  placeholder="秒"
+                  disabled /></label
+              ><label
+                >强度
+                <input
+                  id="beatStrength"
+                  type="number"
+                  min="0.1"
+                  max="1"
+                  step="0.05"
+                  disabled /></label
+              ><button id="addBeat">＋ 当前帧添加</button
+              ><button id="deleteBeat" class="danger-text">删除</button>
+            </div>
+            <details class="batch-tools">
+              <summary>批量调整与拍点数据</summary>
+              <div class="input-row">
+                <label
+                  >整体偏移 / ms<input
+                    id="offsetMs"
+                    type="number"
+                    value="0"
+                    step="10" /></label
+                ><button id="applyOffset">应用偏移</button
+                ><button id="halfBeats">保留隔拍</button
+                ><button id="clearBeats" class="danger-text">清空拍点</button>
+              </div>
+              <div class="input-row">
+                <button id="exportBeats">导出拍点 JSON</button
+                ><label class="button"
+                  >导入拍点<input
+                    id="beatFile"
+                    type="file"
+                    accept=".json,.funscript"
+                    hidden /></label
+                ><button id="exportFunscript">导出 Funscript</button>
+              </div>
+            </details>
+          </div>
+        </section>
+        <aside class="panel style-panel">
+          <div class="panel-heading">
+            <h2><span class="section-number">04</span> 视觉样式</h2>
+            <span class="tiny-label">DESIGN</span>
+          </div>
+          <div class="style-mini">
+            <span></span><i></i><b></b><b></b><b></b>
+          </div>
+          <label class="field-label">色彩主题</label>
+          <div class="swatches">
+            <button
+              style="--swatch: #b7f56c"
+              data-color="#b7f56c"
+              class="selected"
+              aria-label="青柠绿"
+            ></button
+            ><button
+              style="--swatch: #67dce8"
+              data-color="#67dce8"
+              aria-label="冰蓝"
+            ></button
+            ><button
+              style="--swatch: #c4a0ff"
+              data-color="#c4a0ff"
+              aria-label="紫色"
+            ></button
+            ><button
+              style="--swatch: #ff9c74"
+              data-color="#ff9c74"
+              aria-label="橙色"
+            ></button
+            ><button style="--swatch: #ff6fae" data-color="#ff6fae" aria-label="玫瑰粉"></button
+            ><button style="--swatch: #f7d774" data-color="#f7d774" aria-label="暖金色"></button
+            ><label title="自定义拍点颜色"
+              ><input
+                id="color"
+                type="color"
+                value="#b7f56c"
+                aria-label="自定义拍点颜色"
+            /></label>
+          </div>
+          <div class="color-field">
+            <label for="barColor">轨道颜色</label
+            ><input id="barColor" type="color" value="#30363e" />
+          </div>
+          <label class="field-label" for="pattern">鼓点图案</label>
+          <select id="pattern">
+            <option value="circle">圆点</option>
+            <option value="diamond">菱形</option>
+            <option value="triangle">三角</option>
+            <option value="star">星芒</option>
+            <option value="pill">胶囊</option>
+            <option value="custom">自定义图片</option>
+          </select>
+          <label class="button quiet full pattern-upload" for="patternFile">
+            <span id="patternUploadLabel">上传自定义图案</span>
+            <input id="patternFile" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          </label>
+          <p id="patternHint" class="field-note pattern-hint">PNG / JPG / WebP，最大 2 MB；随项目文件保存。</p>
+          <label class="field-label" for="motion">鼓点运动</label>
+          <select id="motion">
+            <option value="right-left">从右侧驶向命中线</option>
+            <option value="left-right">从左侧驶向命中线</option>
+            <option value="meet">双侧出发，中间汇合</option>
+          </select>
+          <label class="field-label" for="hitEffect">命中动效</label>
+          <select id="hitEffect">
+            <option value="ring">涟漪扩散</option>
+            <option value="flash">闪光脉冲</option>
+            <option value="none">关闭动效</option>
+          </select>
+          <div class="field-head">
+            <label for="position">垂直位置</label
+            ><output id="positionValue">82%</output>
+          </div>
+          <input id="position" type="range" min="5" max="95" value="82" />
+          <div class="field-head">
+            <label for="barWidth">轨道宽度</label
+            ><output id="barWidthValue">80%</output>
+          </div>
+          <input id="barWidth" type="range" min="20" max="95" value="80" />
+          <div class="field-head">
+            <label for="barHeight">轨道高度</label
+            ><output id="barHeightValue">44 px</output>
+          </div>
+          <input id="barHeight" type="range" min="12" max="120" value="44" />
+          <div class="field-head">
+            <label for="speed">提前可见时长</label
+            ><output id="speedValue">3 秒</output>
+          </div>
+          <input
+            id="speed"
+            type="range"
+            min="1"
+            max="8"
+            step="0.25"
+            value="3"
+          />
+          <div class="field-head">
+            <label for="marker">命中线位置</label
+            ><output id="markerValue">15%</output>
+          </div>
+          <input id="marker" type="range" min="5" max="50" value="15" />
+          <div class="divider"></div>
+          <div class="tip-card">
+            <span>✳</span>
+            <div>
+              <strong>你的节奏，你来掌控</strong>
+              <p>先自动生成，再逐拍微调。预览和导出使用相同的轨道参数。</p>
+            </div>
+          </div>
+          <button id="resetStyle" class="quiet full">恢复默认样式</button>
+        </aside>
+      </div>
+      <footer>
+        <span>BEATBAR STUDIO <i> / </i> 创造属于你的节奏</span
+        ><span>本地音频分析 <b>·</b> 精确时间轴 <b>·</b> 多格式导出</span>
+      </footer>
+    </main>
+    <div id="downloads" class="downloads" hidden>
+      <strong>已生成的视频</strong
+      ><button class="quiet" id="closeDownloads" aria-label="隐藏下载列表">
+        ✕
+      </button>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <div id="jobPanel" class="job-panel" hidden>
+      <div>
+        <strong id="jobTitle">正在处理</strong><span id="jobPercent">0%</span>
+      </div>
+      <progress id="jobProgress" max="100" value="0"></progress>
+      <div>
+        <span id="jobMessage"></span
+        ><button id="cancelJob" class="quiet">取消任务</button>
+      </div>
+    </div>
+    <dialog id="exportDialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow">EXPORT YOUR RHYTHM</div>
+            <h2>导出你的作品</h2>
+          </div>
+          <button value="cancel" class="quiet" aria-label="关闭">✕</button>
+        </div>
+        <p class="field-note">
+          输出覆盖素材完整时长；纯音频会生成节奏画布视频，视觉样式与时间轴同步。
+        </p>
+        <div class="export-options">
+          <label
+            ><input type="radio" name="mode" value="composite" checked /><strong
+              >素材合成</strong
+            ><small>MP4 · H.264 · 视频保留画面，音频生成节奏画布</small></label
+          ><label
+            ><input type="radio" name="mode" value="green" /><strong
+              >绿幕 BeatBar</strong
+            ><small>MP4 · 纯绿背景 · 便于抠像</small></label
+          ><label
+            ><input type="radio" name="mode" value="transparent" /><strong
+              >透明 BeatBar</strong
+            ><small>WebM · VP9 Alpha · 适合叠加</small></label
+          >
+        </div>
+        <div class="input-row">
+          <label
+            >输出尺寸<select id="resolution">
+              <option value="source">跟随原视频（最长边 1920）</option>
+              <option value="1920,1080">1920 × 1080</option>
+              <option value="1280,720">1280 × 720</option>
+              <option value="1080,1920">1080 × 1920</option>
+              <option value="640,360">640 × 360</option>
+            </select></label
+          ><label
+            >帧率<select id="fps">
+              <option value="24">24 FPS</option>
+              <option value="30" selected>30 FPS</option>
+              <option value="60">60 FPS</option>
+            </select></label
+          >
+        </div>
+        <label class="check-label"
+          ><input
+            id="includeAudio"
+            type="checkbox"
+            checked
+          />包含源音频</label
+        >
+        <p class="field-note">
+          透明 WebM 的浏览器播放器可能显示黑底；请在支持 Alpha
+          的剪辑软件中叠加使用。尺寸变化时原视频等比缩放并补边。
+        </p>
+        <button id="startExport" type="button" class="primary full">
+          开始渲染与导出 ↗
+        </button>
+      </form>
+    </dialog>
+    <dialog id="helpDialog">
+      <div class="dialog-heading">
+        <h2>创作快捷键</h2>
+        <button id="closeHelp" class="quiet">✕</button>
+      </div>
+      <div class="shortcut-list">
+        <span>播放 / 暂停</span><kbd>Space</kbd><span>录制时打点</span
+        ><kbd>F</kbd><span>当前时间添加拍点</span><kbd>A</kbd
+        ><span>删除选中拍点</span><kbd>Delete</kbd><span>上一帧 / 下一帧</span
+        ><kbd>← / →</kbd><span>微调选中拍点 10 ms</span><kbd>Shift + ← / →</kbd
+        ><span>撤销 / 重做</span><kbd>Ctrl + Z / Shift + Z</kbd
+        ><span>保存项目</span><kbd>Ctrl + S</kbd>
+      </div>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

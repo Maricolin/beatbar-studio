@@ -1,0 +1,11 @@
+.venv/
+node_modules/
+data/
+__pycache__/
+*.pyc
+artifacts/
+.browser*/
+beatbar-fixture-*/
+beatbar-test-*/
+beatbar-sample-clicks.wav
+pip-unpack-*/
