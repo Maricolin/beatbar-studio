@@ -595,6 +595,8 @@ input[type="radio"] {
   margin-left: 2px;
 }
 .timeline-scroll {
+  position: relative;
+  overscroll-behavior: contain;
   overflow-x: auto;
   overflow-y: hidden;
   background: #15191d;
@@ -1314,4 +1316,66 @@ select:focus-visible {
     max-width: 440px;
     margin: 0 auto 20px;
   }
+}
+
+.timeline-content {
+  position: relative;
+  height: 170px;
+}
+.timeline-navigation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border-top: 1px solid #292e34;
+}
+.timeline-navigation button {
+  font-size: 10px;
+  padding: 5px 7px;
+}
+.timeline-navigation .check-label {
+  font-size: 10px;
+}
+.timeline-footer {
+  flex-wrap: wrap;
+  line-height: 1.7;
+}
+.beat-loudness {
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: #8da78e;
+}
+.marker-design {
+  margin-top: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #30363e;
+}
+.marker-design summary {
+  cursor: pointer;
+  color: #bbc6cf;
+  font-size: 11px;
+}
+#exportName {
+  width: 100%;
+}
+#exportDialog {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+#exportDialog .input-row {
+  flex-wrap: wrap;
+}
+.download-row {
+  flex-wrap: wrap;
+}
+.download-row small {
+  display: block;
+  width: 100%;
+  color: #b1bdc5;
+  font-size: 11px;
+}
+#timeline:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }

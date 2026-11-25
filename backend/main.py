@@ -23,7 +23,9 @@ import numpy as np
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageOps, ImageEnhance
+from urllib.parse import quote
+from backend.detection import detect_beats
 from pydantic import BaseModel, Field, field_validator, model_validator
 from scipy.signal import butter, find_peaks, sosfiltfilt, stft
 
@@ -269,7 +271,8 @@ def _range_response(path: Path, range_header: str | None, media_type: str, filen
     size = path.stat().st_size
     raw_filename = _safe_name(filename or path.name)
     header_filename = re.sub(r"[^A-Za-z0-9._() -]+", "_", raw_filename).strip(" .") or "media"
-    headers = {"Accept-Ranges": "bytes", "Content-Disposition": f'inline; filename="{header_filename}"'}
+    disposition = f"inline; filename=\"{header_filename}\"; filename*=UTF-8''{quote(raw_filename, safe='')}"
+    headers = {"Accept-Ranges": "bytes", "Content-Disposition": disposition}
     if not range_header:
         headers["Content-Length"] = str(size)
         return FileResponse(path, media_type=media_type, headers=headers)
@@ -319,6 +322,7 @@ def get_media(media_id: str) -> dict[str, Any]:
 class AnalyzeRequest(BaseModel):
     mediaId: str
     sensitivity: int = Field(50, ge=1, le=100)
+    mode: str = Field("onsets", pattern="^(onsets|rhythm)$")
     minInterval: float = Field(0.18, ge=0.05, le=10)
     lowHz: float = Field(40, ge=20, le=10_000)
     highHz: float = Field(3000, gt=20, le=20_000)
@@ -386,45 +390,9 @@ def analyze_audio(media: Media, req: AnalyzeRequest, cancel: threading.Event, pr
     if signal.size < AUDIO_RATE // 4:
         raise ValueError("音频过短，至少需要 0.25 秒。")
     signal = np.nan_to_num(signal, copy=False)
-    # Band-limited spectral flux is robust to silence/background and detects transient onsets.
-    sos = butter(4, [req.lowHz, req.highHz], btype="bandpass", fs=AUDIO_RATE, output="sos")
-    if signal.size > 48:
-        signal = sosfiltfilt(sos, signal)
-    if progress:
-        progress(38, "计算频谱变化")
-    nperseg, hop = 2048, 256
-    _freq, times, z = stft(signal, fs=AUDIO_RATE, nperseg=nperseg, noverlap=nperseg-hop,
-                           boundary="zeros", padded=True)
-    magnitude = np.abs(z)
-    flux = np.maximum(0, np.diff(magnitude, axis=1, prepend=magnitude[:, :1])).sum(axis=0)
-    # Local baseline lets a click stand out even when overall loudness changes.
-    baseline = np.convolve(flux, np.ones(31, dtype=np.float64) / 31, mode="same")
-    novelty = np.maximum(0, flux - baseline * 0.8)
-    peak_value = float(np.max(novelty)) if novelty.size else 0.0
-    if peak_value <= 1e-10:
-        return {"beats": [], "bpm": 0}
-    prominence = peak_value * (0.06 + (100 - req.sensitivity) / 450)
-    distance = max(1, int(math.ceil(req.minInterval * AUDIO_RATE / hop)))
-    peaks, properties = find_peaks(novelty, distance=distance, prominence=prominence)
-    if not len(peaks):
-        peaks = np.array([int(np.argmax(novelty))])
-    # The peak strength uses a percentile normalization, stable between quiet/loud files.
-    scale = max(float(np.percentile(novelty[peaks], 95)), 1e-12)
-    beats = [{"time": round(float(times[int(i)]), 4), "strength": round(min(1.0, float(novelty[int(i)]) / scale), 4)} for i in peaks]
-    beats = [b for b in beats if 0 <= b["time"] <= media.duration]
-    intervals = np.diff([b["time"] for b in beats])
-    intervals = intervals[(intervals >= req.minInterval) & (intervals <= 2.5)]
-    bpm = 0
-    if intervals.size:
-        raw_bpm = 60 / float(np.median(intervals))
-        while raw_bpm < 60:
-            raw_bpm *= 2
-        while raw_bpm > 200:
-            raw_bpm /= 2
-        bpm = int(round(raw_bpm))
-    if progress:
-        progress(92, "整理节拍")
-    return {"beats": beats, "bpm": bpm}
+    return detect_beats(signal, AUDIO_RATE, media.duration, sensitivity=req.sensitivity,
+                        min_interval=req.minInterval, low_hz=req.lowHz, high_hz=req.highHz,
+                        mode=req.mode, cancel=cancel, progress=progress)
 
 
 def _run_analysis(job: Job, req: AnalyzeRequest):
@@ -453,6 +421,7 @@ def start_analysis(req: AnalyzeRequest) -> dict[str, str]:
 class Beat(BaseModel):
     time: float = Field(ge=0, le=MAX_MEDIA_SECONDS)
     strength: float = Field(ge=0, le=1)
+    loudnessDb: float | None = Field(None, ge=-120, le=6)
 
 class Style(BaseModel):
     color: str = "#ffffff"
@@ -472,8 +441,15 @@ class Style(BaseModel):
     effectIntensity: float = Field(1.0, ge=0.25, le=2)
     beatScale: float = Field(1.0, ge=0.5, le=1.5)
     patternImage: str | None = Field(None, max_length=2_800_000)
+    trackType: str = Field("classic", pattern="^(classic|converge)$")
+    markerPattern: str = Field("line", pattern="^(line|circle|diamond|star|heart|custom)$")
+    markerColor: str = "#ffffff"
+    markerScale: float = Field(1, ge=0.5, le=2)
+    markerImage: str | None = Field(None, max_length=2_800_000)
+    dbFloor: float = Field(-48, ge=-96, le=-6)
+    dbCeiling: float = Field(-6, ge=-24, le=0)
 
-    @field_validator("color", "secondaryColor", "backgroundColor", "barColor")
+    @field_validator("color", "secondaryColor", "backgroundColor", "barColor", "markerColor")
     @classmethod
     def valid_color(cls, value: str):
         _parse_color(value)
@@ -482,7 +458,7 @@ class Style(BaseModel):
     @field_validator("colorMode")
     @classmethod
     def valid_color_mode(cls, value: str):
-        if value not in {"solid", "alternate", "strength"}:
+        if value not in {"solid", "alternate", "strength", "loudness"}:
             raise ValueError("不支持的鼓点颜色模式。")
         return value
 
@@ -490,12 +466,16 @@ class Style(BaseModel):
     def custom_pattern_has_image(self):
         if self.pattern == "custom" and not self.patternImage:
             raise ValueError("请先上传自定义鼓点图案。")
+        if self.markerPattern == "custom" and not self.markerImage:
+            raise ValueError("请先上传自定义命中标记图案。")
+        if self.dbCeiling <= self.dbFloor:
+            raise ValueError("响度上限必须高于下限。")
         return self
 
     @field_validator("pattern")
     @classmethod
     def valid_pattern(cls, value: str):
-        if value not in {"circle", "diamond", "triangle", "star", "pill", "hexagon", "heart", "custom"}:
+        if value not in {"circle", "bar", "diamond", "triangle", "star", "pill", "hexagon", "heart", "custom"}:
             raise ValueError("不支持的鼓点图案。")
         return value
 
@@ -522,6 +502,19 @@ class ExportRequest(BaseModel):
     height: int = Field(720, ge=64, le=MAX_EXPORT_DIMENSION)
     fps: int = Field(30, ge=1, le=60)
     includeAudio: bool = True
+    filename: str | None = Field(None, max_length=120)
+
+    @field_validator("filename")
+    @classmethod
+    def valid_filename(cls, value):
+        if value is None:
+            return value
+        value = value.strip()
+        if not value or value[-1] in " ." or re.search(r'[<>:"/\\|?*\x00-\x1f]', value):
+            raise ValueError("文件名不可包含路径或特殊字符。")
+        if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", value, re.I):
+            raise ValueError("文件名不能使用系统保留名称。")
+        return value
 
     @field_validator("mode")
     @classmethod
@@ -573,7 +566,9 @@ def _load_pattern_image(data: str | None) -> Image.Image | None:
 
 def _draw_beat_shape(draw: ImageDraw.ImageDraw, pattern: str, cx: float, cy: float, radius: int, fill):
     x, y, r = int(round(cx)), int(round(cy)), max(1, int(radius))
-    if pattern == "diamond":
+    if pattern == "bar":
+        draw.rounded_rectangle((x-max(1,r*.16), y-r, x+max(1,r*.16), y+r),radius=max(1,r*.16),fill=fill)
+    elif pattern == "diamond":
         points = [(x, y-r), (x+r, y), (x, y+r), (x-r, y)]
         draw.polygon(points, fill=fill)
     elif pattern == "triangle":
@@ -606,8 +601,15 @@ def _mix_color(a, b, amount):
     return tuple(int(math.floor(x + (y-x) * amount + 0.5)) for x, y in zip(a, b))
 
 
-def _beat_color(style: Style, index: int, strength: float, side: int = 0):
+def _loudness_amount(style, strength, db=None):
+    db = db if db is not None else 20*math.log10(max(.001, strength))
+    return max(0, min(1, (db-style.dbFloor)/max(1, style.dbCeiling-style.dbFloor)))
+
+
+def _beat_color(style: Style, index: int, strength: float, side: int = 0, db=None):
     primary, secondary = _parse_color(style.color), _parse_color(style.secondaryColor)
+    if style.colorMode == "loudness":
+        return _mix_color((16,20,24), primary, .2+.8*_loudness_amount(style,strength,db))
     if style.colorMode == "strength":
         return _mix_color(secondary, primary, strength)
     if style.colorMode == "alternate":
@@ -616,10 +618,12 @@ def _beat_color(style: Style, index: int, strength: float, side: int = 0):
 
 
 def _render_overlay(width: int, height: int, beats: list[Beat], t: float, style: Style,
-                    pattern_image: Image.Image | None = None, pattern_cache=None, beat_times=None):
+                    pattern_image: Image.Image | None = None, pattern_cache=None, beat_times=None, marker_image=None):
     """Draw the same track as frontend/visuals.js; effects composite above beats."""
     frame = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(frame)
+    if style.trackType == "converge":
+        style = style.model_copy(update={"motion": "meet"})
     track_width = width * style.barWidth
     left = (width - track_width) / 2
     cy, bar_h = height * style.position, min(height, style.barHeight)
@@ -627,6 +631,10 @@ def _render_overlay(width: int, height: int, beats: list[Beat], t: float, style:
     x0, x1 = int(round(left)), int(round(left + track_width))
     y0, y1 = int(round(cy - bar_h/2)), int(round(cy + bar_h/2))
     draw.rounded_rectangle((x0, y0, x1, y1), radius=min(6, bar_h / 3), fill=(*_parse_color(style.barColor), 255))
+    if style.trackType == "converge":
+        rail_color = (*_mix_color(_parse_color(style.barColor),_parse_color(style.color),.22),255)
+        for offset in (-.25,.25):
+            draw.line((x0,cy+bar_h*offset,x1,cy+bar_h*offset),fill=rail_color,width=1)
     beat_layer = Image.new("RGBA", (max(1, x1-x0), max(1, y1-y0)), (0, 0, 0, 0))
     beat_draw = ImageDraw.Draw(beat_layer)
     cache = pattern_cache if pattern_cache is not None else {}
@@ -654,9 +662,13 @@ def _render_overlay(width: int, height: int, beats: list[Beat], t: float, style:
                     scale = size/max(pattern_image.size)
                     stamp = pattern_image.resize((max(1, int(round(pattern_image.width*scale))), max(1, int(round(pattern_image.height*scale)))), Image.Resampling.LANCZOS)
                     cache[size] = stamp
+                if style.colorMode == "loudness":
+                    rgb = ImageEnhance.Brightness(stamp.convert("RGB")).enhance(.2+.8*_loudness_amount(style,beat.strength,beat.loudnessDb))
+                    rgb.putalpha(stamp.getchannel("A"))
+                    stamp = rgb
                 beat_layer.alpha_composite(stamp, (int(round(bx-x0-stamp.width/2)), int(round(cy-y0-stamp.height/2))))
             else:
-                _draw_beat_shape(beat_draw, style.pattern, bx-x0, cy-y0, max(1, int(round(radius))), (*_beat_color(style, index, beat.strength, side), 255))
+                _draw_beat_shape(beat_draw, style.pattern, bx-x0, cy-y0, max(1, int(round(radius))), (*_beat_color(style, index, beat.strength, side, beat.loudnessDb), 255))
     frame.alpha_composite(beat_layer, (x0, y0))
     if style.hitEffect != "none":
         for index in range(start, end):
@@ -667,7 +679,7 @@ def _render_overlay(width: int, height: int, beats: list[Beat], t: float, style:
             progress = age/style.hitDuration
             radius = bar_h*0.3*(0.55+0.45*beat.strength)*style.beatScale
             color = (_mix_color(_parse_color(style.color), _parse_color(style.secondaryColor), 0.5)
-                     if style.colorMode == "alternate" and style.motion == "meet" else _beat_color(style, index, beat.strength))
+                     if style.colorMode == "alternate" and style.motion == "meet" else _beat_color(style, index, beat.strength, 0, beat.loudnessDb))
             alpha = int(round(min(1, (1-progress)*style.effectIntensity*{"ring": 0.85, "flash": 0.3, "burst": 0.9}[style.hitEffect])*255))
             effect = Image.new("RGBA", frame.size, (0, 0, 0, 0))
             effect_draw = ImageDraw.Draw(effect)
@@ -687,7 +699,15 @@ def _render_overlay(width: int, height: int, beats: list[Beat], t: float, style:
                     effect_draw.ellipse(box, fill=(*color, alpha))
             frame = Image.alpha_composite(frame, effect)
     draw = ImageDraw.Draw(frame)
-    draw.line((int(round(marker)), cy-bar_h*0.7, int(round(marker)), cy+bar_h*0.7), fill=(255,255,255,255), width=2)
+    marker_size = bar_h*1.4*style.markerScale
+    if style.markerPattern == "custom" and marker_image is not None:
+        factor = marker_size/max(marker_image.size)
+        stamp = marker_image.resize((max(1,round(marker_image.width*factor)),max(1,round(marker_image.height*factor))),Image.Resampling.LANCZOS)
+        frame.alpha_composite(stamp,(round(marker-stamp.width/2),round(cy-stamp.height/2)))
+    elif style.markerPattern == "line":
+        draw.line((int(round(marker)), cy-marker_size/2, int(round(marker)), cy+marker_size/2),fill=(*_parse_color(style.markerColor),255),width=max(1,round(2*style.markerScale)))
+    else:
+        _draw_beat_shape(draw,style.markerPattern,marker,cy,max(1,round(marker_size/2)),(*_parse_color(style.markerColor),255))
     return frame
 
 
@@ -706,6 +726,7 @@ def _ffmpeg_export(media: Media, req: ExportRequest, job: Job, output: Path, dur
     bg_color = (0, 255, 0) if req.mode == "green" else (0, 0, 0)
     canvas_color = "0x" + "".join(f"{v:02x}" for v in _parse_color(req.style.backgroundColor))
     pattern_image = _load_pattern_image(req.style.patternImage)
+    marker_image = _load_pattern_image(req.style.markerImage)
     if req.style.pattern == "custom" and pattern_image is None:
         raise ValueError("请先上传自定义鼓点图案。")
     raw_input = ["-f", "rawvideo", "-pix_fmt", "rgba", "-s:v", f"{width}x{height}", "-r", str(fps), "-i", "pipe:0"]
@@ -761,7 +782,7 @@ def _ffmpeg_export(media: Media, req: ExportRequest, job: Job, output: Path, dur
             if job.cancel_event.is_set():
                 raise RuntimeError("Cancelled")
             t = index / fps
-            frame = _render_overlay(width, height, req.beats, t, req.style, pattern_image, pattern_cache, beat_times)
+            frame = _render_overlay(width, height, req.beats, t, req.style, pattern_image, pattern_cache, beat_times, marker_image)
             if req.mode == "green":
                 base = Image.new("RGBA", (width, height), (*bg_color, 255))
                 base.alpha_composite(frame)
@@ -821,7 +842,10 @@ def _run_export(job: Job, req: ExportRequest):
         if job.cancel_event.is_set():
             raise RuntimeError("Cancelled")
         temp.replace(output)
-        _set_job(job, status="done", progress=100, message="导出完成", result={"url": f"/api/exports/{filename}", "filename": filename})
+        download_name = req.filename or filename
+        stem = re.sub(r"\.(mp4|webm)$", "", download_name, flags=re.I)
+        download_name = stem[:120-len(output.suffix)] + output.suffix
+        _set_job(job, status="done", progress=100, message="导出完成", result={"url": f"/api/exports/{filename}?downloadName={quote(download_name)}", "filename": download_name, "storageFilename": filename, "size":output.stat().st_size})
     except Exception as exc:
         if output:
             output.with_name(output.stem + ".part" + output.suffix).unlink(missing_ok=True)
@@ -841,6 +865,7 @@ def start_export(req: ExportRequest) -> dict[str, str]:
         _parse_color(req.style.color)
         _parse_color(req.style.barColor)
         _load_pattern_image(req.style.patternImage)
+        _load_pattern_image(req.style.markerImage)
         if req.style.pattern == "custom" and not req.style.patternImage:
             raise ValueError("请先上传自定义鼓点图案。")
     except ValueError as exc:
@@ -867,14 +892,24 @@ def cancel_job(job_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/exports/{filename}")
-def download_export(filename: str, range_header: str | None = Header(default=None, alias="Range")):
+def download_export(filename: str, downloadName: str | None = None, range_header: str | None = Header(default=None, alias="Range")):
     if filename != Path(filename).name or not re.fullmatch(r"beatbar-[0-9a-f]{32}\.(?:mp4|webm)", filename):
         raise HTTPException(status_code=404, detail="Export not found")
     path = export_dir() / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Export not found")
     media_type = "video/webm" if path.suffix == ".webm" else "video/mp4"
-    return _range_response(path, range_header, media_type, filename)
+    name = filename
+    if downloadName:
+        if len(downloadName) > 120:
+            raise HTTPException(status_code=422, detail="文件名不得超过 120 个字符。")
+        try:
+            name = ExportRequest.valid_filename(downloadName)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if Path(name).suffix.lower() != path.suffix:
+            raise HTTPException(status_code=422, detail="文件扩展名与视频格式不一致。")
+    return _range_response(path, range_header, media_type, name)
 
 
 frontend = ROOT / "frontend"

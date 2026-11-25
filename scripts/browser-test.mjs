@@ -28,7 +28,12 @@ ws.onmessage = (e) => {
     if (m.error) p.reject(Error(m.error.message));
     else p.resolve(m.result);
   } else if (m.method === "Runtime.exceptionThrown")
-    errors.push(m.params.exceptionDetails.text);
+    errors.push(
+      m.params.exceptionDetails.exception?.description ||
+        m.params.exceptionDetails.text,
+    );
+  else if (m.method === "Page.javascriptDialogOpening")
+    cdp("Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
 };
 function cdp(method, params = {}) {
   return new Promise((resolve, reject) => {
@@ -77,6 +82,9 @@ async function click(selector) {
     "document.querySelector(" + JSON.stringify(selector) + ").click()",
   );
 }
+await cdp("Page.enable");
+await cdp("Page.reload", { ignoreCache: true });
+await new Promise((resolve) => setTimeout(resolve, 300));
 await cdp("Runtime.enable");
 await until(
   'document.getElementById("connection").textContent.includes("已连接")',
@@ -138,6 +146,9 @@ assert(
   ),
 );
 for (const mode of ["green", "transparent", "composite"]) {
+  const previousDownloads = await evaluate(
+    'document.querySelectorAll(".download-row").length',
+  );
   await click("#openExport");
   await evaluate(
     'document.querySelector("input[name=mode][value=' +
@@ -146,8 +157,8 @@ for (const mode of ["green", "transparent", "composite"]) {
   );
   await click("#startExport");
   await until(
-    '!document.getElementById("openExport").disabled&&document.querySelectorAll(".download-row").length>=' +
-      (["green", "transparent", "composite"].indexOf(mode) + 1),
+    '!document.getElementById("openExport").disabled&&document.querySelectorAll(".download-row").length===' +
+      (previousDownloads + 1),
     60000,
   );
   console.log("PASS " + mode + " export + repeated export UI");

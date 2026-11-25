@@ -87,8 +87,13 @@
             <button id="analyze" class="primary full">
               ✧ 分析音乐，生成拍点
             </button>
+            <label class="field-label" for="analysisMode">识别方式</label>
+            <select id="analysisMode">
+              <option value="onsets">鼓点起音 · 保留真实敲击</option>
+              <option value="rhythm">稳定节奏 · 过滤偏离主节奏的弱拍</option>
+            </select>
             <p class="field-note">
-              基于频谱变化与起音峰值检测。复杂混音建议识别后手动校准。
+              多频段起音、自适应阈值与瞬态校准，同时测量拍点响度。复杂混音建议识别后手动校准。
             </p>
           </section>
           <section id="manualPanel" hidden>
@@ -217,10 +222,26 @@
                 ><button id="zoomIn" title="放大">＋</button>
               </div>
             </div>
+            <div class="timeline-navigation">
+              <button id="previousBeat" title="跳到上一拍">上一拍</button
+              ><button id="nextBeat" title="跳到下一拍">下一拍</button>
+              <button id="zoomFit">适应全长</button
+              ><button id="centerPlayhead">定位播放头</button>
+              <label class="check-label"
+                ><input id="snapTimeline" type="checkbox" />吸附 ¼ 拍</label
+              >
+              <label class="check-label"
+                ><input
+                  id="followTimeline"
+                  type="checkbox"
+                  checked
+                />播放跟随</label
+              >
+            </div>
             <div class="timeline-scroll" id="timelineScroll">
               <canvas
                 id="timeline"
-                aria-label="节奏时间轴，点击定位，双击添加，拖动调整拍点"
+                aria-label="节奏时间轴：拖动标尺定位，滚轮缩放，Shift滚轮平移，双击添加拍点"
                 tabindex="0"
               ></canvas>
             </div>
@@ -228,10 +249,14 @@
               <span
                 ><i class="legend-wave"></i> 音频波形
                 <i class="legend-beat"></i> 节奏拍点</span
-              ><span>双击添加 · 拖动调整 · Delete 删除</span>
+              ><span
+                >拖动标尺定位 · 滚轮缩放 · Shift+滚轮 / 中键拖动平移 · Alt
+                临时关闭吸附</span
+              >
             </div>
             <div class="selection-editor">
               <span id="selectedLabel">未选择拍点</span
+              ><span id="beatLoudness" class="beat-loudness"></span
               ><label
                 >时间
                 <input
@@ -358,6 +383,38 @@
             <option value="solid">纯色</option>
             <option value="alternate">双色交替 · 汇合时左右分色</option>
             <option value="strength">随强度混色 · 弱拍到强拍</option>
+            <option value="loudness">随鼓点分贝深浅 · 越响越亮</option>
+          </select>
+          <div id="loudnessControls" hidden>
+            <div class="input-row">
+              <label
+                >暗色阈值 / dBFS<input
+                  id="dbFloor"
+                  type="number"
+                  min="-96"
+                  max="-6"
+                  value="-48"
+                  step="1"
+              /></label>
+              <label
+                >亮色阈值 / dBFS<input
+                  id="dbCeiling"
+                  type="number"
+                  min="-24"
+                  max="0"
+                  value="-6"
+                  step="1"
+              /></label>
+            </div>
+            <p class="field-note">
+              采用拍点附近的音频 RMS
+              dBFS；手工或旧项目拍点使用强度估算。图片图案同步调整亮度。
+            </p>
+          </div>
+          <label class="field-label" for="trackType">节拍条类型</label>
+          <select id="trackType">
+            <option value="classic">标准节拍条</option>
+            <option value="converge">双侧汇合 · 竖线节拍条</option>
           </select>
           <label class="field-label" for="pattern">鼓点图案</label>
           <div
@@ -368,6 +425,7 @@
           ></div>
           <select id="pattern" aria-label="鼓点图案" class="sr-only">
             <option value="circle">圆点</option>
+            <option value="bar">竖线</option>
             <option value="diamond">菱形</option>
             <option value="triangle">三角</option>
             <option value="star">星芒</option>
@@ -398,6 +456,47 @@
             <option value="meet">双侧出发，中间汇合</option>
           </select>
           <p id="motionHint" class="field-note"></p>
+          <details class="marker-design">
+            <summary>命中竖线与自定义标记</summary>
+            <label class="field-label" for="markerPattern">命中标记图案</label>
+            <select id="markerPattern">
+              <option value="line">竖线</option>
+              <option value="circle">圆形</option>
+              <option value="diamond">菱形</option>
+              <option value="star">星芒</option>
+              <option value="heart">心形</option>
+              <option value="custom">自定义图片</option>
+            </select>
+            <div class="color-field">
+              <label for="markerColor">标记颜色</label
+              ><input id="markerColor" type="color" value="#ffffff" />
+            </div>
+            <div class="field-head">
+              <label for="markerScale">标记大小</label
+              ><output id="markerScaleValue">1×</output>
+            </div>
+            <input
+              id="markerScale"
+              type="range"
+              min="0.5"
+              max="2"
+              value="1"
+              step="0.05"
+            />
+            <label class="button quiet full pattern-upload" for="markerFile"
+              ><img id="markerThumbnail" alt="命中标记缩略图" hidden /><span
+                >上传命中线图案</span
+              ><input
+                id="markerFile"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                hidden
+            /></label>
+            <p class="field-note">
+              与移动鼓点图案独立；PNG / JPG / WebP，最大 2
+              MB，保留比例与透明度。
+            </p>
+          </details>
           <label class="field-label" for="hitEffect">命中动效</label>
           <select id="hitEffect">
             <option value="ring">涟漪扩散</option>
@@ -553,6 +652,25 @@
             </select></label
           >
         </div>
+        <label class="field-label" for="exportName">文件名</label>
+        <input
+          id="exportName"
+          type="text"
+          value="beatbar"
+          maxlength="100"
+          autocomplete="off"
+        />
+        <p id="exportFilenameHint" class="field-note"></p>
+        <div class="input-row">
+          <label
+            >保存位置<select id="saveLocation">
+              <option value="browser">浏览器下载目录</option>
+              <option value="choose">每次选择完整保存路径</option>
+              <option value="directory" disabled>所选文件夹</option>
+            </select></label
+          ><button id="chooseExportDirectory" type="button">选择文件夹…</button>
+        </div>
+        <p id="saveLocationNote" class="field-note"></p>
         <label class="check-label"
           ><input id="includeAudio" type="checkbox" checked />包含源音频</label
         >
@@ -576,7 +694,9 @@
         ><span>删除选中拍点</span><kbd>Delete</kbd><span>上一帧 / 下一帧</span
         ><kbd>← / →</kbd><span>微调选中拍点 10 ms</span><kbd>Shift + ← / →</kbd
         ><span>撤销 / 重做</span><kbd>Ctrl + Z / Shift + Z</kbd
-        ><span>保存项目</span><kbd>Ctrl + S</kbd>
+        ><span>保存项目</span><kbd>Ctrl + S</kbd><span>时间轴缩放 / 平移</span
+        ><kbd>滚轮 / Shift + 滚轮</kbd><span>时间轴首尾定位</span
+        ><kbd>Home / End</kbd><span>平移时间轴</span><kbd>中键拖动</kbd>
       </div>
     </dialog>
     <script type="module" src="/app.js"></script>

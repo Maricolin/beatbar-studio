@@ -1,11 +1,14 @@
 {
   "name": "beatbar-studio",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
+  "type": "module",
   "license": "MIT",
   "scripts": {
     "format": "prettier --write frontend scripts/*.mjs",
-    "check": "node --check frontend/app.js && node --check frontend/visuals.js && prettier --check frontend scripts/*.mjs",
+    "check": "node --check frontend/app.js && node --check frontend/visuals.js && node --check frontend/timeline.js && node --check frontend/export.js && prettier --check frontend scripts/*.mjs",
+    "test:unit": "node scripts/studio-unit-test.mjs",
+    "test:studio": "node scripts/studio-browser-test.mjs",
     "test:browser": "node scripts/browser-test.mjs",
     "test:visuals": "node scripts/visual-browser-test.mjs"
   },

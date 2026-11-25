@@ -1,4 +1,6 @@
 import { DEFAULT_STYLE, PALETTES, PATTERNS, drawTrack } from "./visuals.js";
+import { createTimeline } from "./timeline.js";
+import { exportFilename, createExportDestination } from "./export.js";
 
 const $ = (id) => document.getElementById(id);
 const video = $("video"),
@@ -21,8 +23,8 @@ const state = {
   pendingProject: null,
 };
 let toastTimer,
-  drag = null,
   customPattern = null,
+  customMarker = null,
   audioContext,
   lastTime = 0,
   pollTimer;
@@ -108,6 +110,9 @@ function normalize(beats, maxDuration = duration()) {
     .map((b) => ({
       time: Number(typeof b === "number" ? b : b.time),
       strength: Number(typeof b === "number" ? 1 : (b.strength ?? 1)),
+      ...(typeof b !== "number" && Number.isFinite(b.loudnessDb)
+        ? { loudnessDb: clamp(b.loudnessDb, -120, 6) }
+        : {}),
     }))
     .filter(
       (b) =>
@@ -119,6 +124,7 @@ function normalize(beats, maxDuration = duration()) {
     .map((b) => ({
       time: Math.min(maxDuration, Math.round(b.time * 1000) / 1000),
       strength: clamp(b.strength, 0.1, 1),
+      ...(Number.isFinite(b.loudnessDb) ? { loudnessDb: b.loudnessDb } : {}),
     }))
     .sort((a, b) => a.time - b.time);
 }
@@ -161,6 +167,11 @@ function updateSelection() {
   $("beatTime").value = b ? b.time.toFixed(3) : "";
   $("beatStrength").value = b ? b.strength.toFixed(2) : "";
   $("deleteBeat").disabled = !b;
+  $("beatLoudness").textContent = b
+    ? Number.isFinite(b.loudnessDb)
+      ? b.loudnessDb.toFixed(1) + " dBFS"
+      : "手工强度"
+    : "";
 }
 function addBeat(t = playhead()) {
   if (!requireMedia()) return;
@@ -248,8 +259,9 @@ function setMedia(m) {
   state.selected = -1;
   state.recording = false;
   updateRecord();
-  state.zoom = 1;
-  $("zoomLabel").textContent = "1×";
+  timelineEditor.reset();
+  $("exportName").value = m.name.replace(/\.[^.]+$/, "") + "-beatbar";
+  updateExportName();
   pausePlayback();
   if (m.hasVideo) {
     audio.removeAttribute("src");
@@ -466,6 +478,7 @@ $("analyze").onclick = () => {
     {
       mediaId: state.media.id,
       sensitivity: num("sensitivity"),
+      mode: $("analysisMode").value,
       minInterval: num("minInterval"),
       lowHz,
       highHz,
@@ -540,157 +553,47 @@ $("clearBeats").onclick = () => {
   replaceBeats([]);
   toast("已清空拍点，可使用撤销恢复");
 };
-function timelineWidth() {
-  return Math.max(1, $("timelineScroll").clientWidth) * state.zoom;
-}
-function timelineX(t) {
-  return 18 + ((timelineWidth() - 36) * t) / duration();
-}
-function timelineTime(x) {
-  return clamp(((x - 18) / (timelineWidth() - 36)) * duration(), 0, duration());
-}
-function sizeCanvas(canvas, w, h) {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const pw = Math.round(w * dpr),
-    ph = Math.round(h * dpr);
-  if (canvas.width !== pw || canvas.height !== ph) {
-    canvas.width = pw;
-    canvas.height = ph;
-    canvas.style.width = w + "px";
-    canvas.style.height = h + "px";
-  }
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return ctx;
-}
+const timelineEditor = createTimeline({
+  canvas: timeline,
+  scroll: $("timelineScroll"),
+  getDuration: duration,
+  getTime: playhead,
+  seek,
+  getBeats: () => state.beats,
+  getSelected: () => state.selected,
+  setSelected: (i) => {
+    state.selected = i;
+  },
+  checkpoint,
+  changed,
+  updateSelection,
+  getStyle: () => state.style,
+  getWaveform: () => state.media?.waveform || [],
+  getBpm: () => num("bpm"),
+  hasMedia: () => !!state.media,
+  formatTime,
+  addBeat,
+  pause: pausePlayback,
+  isPlaying: () => !playbackElement().paused,
+  onZoom: (value) => {
+    $("zoomLabel").textContent = value.toFixed(1).replace(".0", "") + "×";
+    state.zoom = value;
+  },
+});
 function drawTimeline() {
-  const w = timelineWidth(),
-    h = 170,
-    ctx = sizeCanvas(timeline, w, h);
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#15191d";
-  ctx.fillRect(0, 0, w, h);
-  const desired = duration() / Math.max(2, w / 95);
-  const steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
-  const step = steps.find((s) => s >= desired) || 1200;
-  ctx.font = "10px monospace";
-  for (let t = 0; t <= duration(); t += step) {
-    const x = timelineX(t);
-    ctx.strokeStyle = "#2a3138";
-    ctx.beginPath();
-    ctx.moveTo(x, 29);
-    ctx.lineTo(x, h);
-    ctx.stroke();
-    ctx.fillStyle = "#707d86";
-    ctx.fillText(formatTime(t).slice(0, -4), x + 3, 18);
-  }
-  const wave = state.media?.waveform || [];
-  ctx.fillStyle = "#44594c";
-  const mid = 97;
-  const columns = Math.floor(w - 36);
-  for (let x = 0; x < columns; x += 2) {
-    const i = Math.floor((x / columns) * wave.length);
-    const v = Number(wave[i]) || 0;
-    const amp = Math.max(1, v * 43);
-    ctx.fillRect(x + 18, mid - amp, 1.5, amp * 2);
-  }
-  for (let i = 0; i < state.beats.length; i++) {
-    const b = state.beats[i],
-      x = timelineX(b.time);
-    ctx.strokeStyle = i === state.selected ? "#ffffff" : state.style.color;
-    ctx.lineWidth = i === state.selected ? 2.5 : 1.5;
-    ctx.beginPath();
-    ctx.moveTo(x, 42);
-    ctx.lineTo(x, 151);
-    ctx.stroke();
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.beginPath();
-    ctx.moveTo(x, 34);
-    ctx.lineTo(x + 5, 40);
-    ctx.lineTo(x, 46);
-    ctx.lineTo(x - 5, 40);
-    ctx.closePath();
-    ctx.fill();
-  }
-  const x = timelineX(playhead());
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "#e1e9ee";
-  ctx.beginPath();
-  ctx.moveTo(x, 24);
-  ctx.lineTo(x, h);
-  ctx.stroke();
-  ctx.fillStyle = "#e1e9ee";
-  ctx.beginPath();
-  ctx.moveTo(x - 5, 24);
-  ctx.lineTo(x + 5, 24);
-  ctx.lineTo(x, 30);
-  ctx.fill();
+  timelineEditor.draw();
 }
-function zoom(value) {
-  state.zoom = clamp(
-    value,
-    1,
-    Math.min(16, 14000 / Math.max(1, $("timelineScroll").clientWidth)),
-  );
-  $("zoomLabel").textContent = state.zoom.toFixed(1).replace(".0", "") + "×";
-  drawTimeline();
-  const x = timelineX(playhead());
-  $("timelineScroll").scrollLeft = Math.max(
-    0,
-    x - $("timelineScroll").clientWidth / 2,
-  );
-}
-$("zoomIn").onclick = () => zoom(state.zoom * 2);
-$("zoomOut").onclick = () => zoom(state.zoom / 2);
-function pointerX(e) {
-  return e.clientX - timeline.getBoundingClientRect().left;
-}
-timeline.onpointerdown = (e) => {
-  if (!state.media) return;
-  const x = pointerX(e);
-  let nearest = -1,
-    dist = 9;
-  state.beats.forEach((b, i) => {
-    const d = Math.abs(timelineX(b.time) - x);
-    if (d < dist) {
-      dist = d;
-      nearest = i;
-    }
-  });
-  state.selected = nearest;
-  updateSelection();
-  if (nearest >= 0) {
-    drag = { beat: state.beats[nearest], startX: x, changed: false };
-    timeline.setPointerCapture(e.pointerId);
-  } else seek(timelineTime(x));
-  drawTimeline();
-};
-timeline.onpointermove = (e) => {
-  if (!drag) return;
-  const x = pointerX(e);
-  if (!drag.changed && Math.abs(x - drag.startX) < 3) return;
-  if (!drag.changed) {
-    checkpoint();
-    drag.changed = true;
-  }
-  drag.beat.time = Math.min(
-    duration(),
-    Math.round(timelineTime(x) * 1000) / 1000,
-  );
-  state.beats.sort((a, b) => a.time - b.time);
-  state.selected = state.beats.indexOf(drag.beat);
-  updateSelection();
-  drawTimeline();
-};
-function stopDrag() {
-  if (drag) {
-    drag = null;
-    changed();
-  }
-}
-timeline.onpointerup = stopDrag;
-timeline.onpointercancel = stopDrag;
-timeline.ondblclick = (e) => addBeat(timelineTime(pointerX(e)));
+$("zoomIn").onclick = () => timelineEditor.zoom(timelineEditor.getZoom() * 1.5);
+$("zoomOut").onclick = () =>
+  timelineEditor.zoom(timelineEditor.getZoom() / 1.5);
+$("zoomFit").onclick = () => timelineEditor.fit();
+$("centerPlayhead").onclick = () => timelineEditor.center();
+$("previousBeat").onclick = () => timelineEditor.previous();
+$("nextBeat").onclick = () => timelineEditor.next();
+$("snapTimeline").onchange = () =>
+  timelineEditor.setSnap($("snapTimeline").checked);
+$("followTimeline").onchange = () =>
+  timelineEditor.setFollow($("followTimeline").checked);
 function outputSize() {
   if ($("resolution").value === "source") {
     const w = state.media?.width || 1280,
@@ -721,9 +624,24 @@ function drawOverlay() {
     ctx.fillStyle = state.style.backgroundColor;
     ctx.fillRect(0, 0, w, h);
   }
-  drawTrack(ctx, w, h, state.beats, playhead(), state.style, customPattern);
+  drawTrack(
+    ctx,
+    w,
+    h,
+    state.beats,
+    playhead(),
+    state.style,
+    customPattern,
+    customMarker,
+  );
 }
-const colorKeys = ["color", "secondaryColor", "barColor", "backgroundColor"];
+const colorKeys = [
+  "color",
+  "secondaryColor",
+  "barColor",
+  "backgroundColor",
+  "markerColor",
+];
 const percentKeys = ["position", "barWidth", "marker"];
 const numericKeys = [
   ...percentKeys,
@@ -732,6 +650,7 @@ const numericKeys = [
   "beatScale",
   "hitDuration",
   "effectIntensity",
+  "markerScale",
 ];
 function renderStyleChoices() {
   for (const palette of PALETTES) {
@@ -745,7 +664,8 @@ function renderStyleChoices() {
         (button.querySelectorAll("i")[index].style.background = color),
     );
     button.onclick = () => {
-      for (const key of colorKeys) state.style[key] = palette[key];
+      for (const key of colorKeys)
+        if (palette[key]) state.style[key] = palette[key];
       syncStyle();
     };
     $("palettes").append(button);
@@ -770,7 +690,14 @@ function renderStyleChoices() {
 function syncStyle() {
   for (const key of colorKeys) $(key).value = state.style[key];
   document.documentElement.style.setProperty("--accent", state.style.color);
-  for (const key of ["pattern", "motion", "hitEffect", "colorMode"])
+  for (const key of [
+    "pattern",
+    "motion",
+    "hitEffect",
+    "colorMode",
+    "trackType",
+    "markerPattern",
+  ])
     $(key).value = state.style[key];
   $("patternHint").textContent = state.style.patternImage
     ? "图案已载入，原始比例与透明度会保留，并随项目保存。"
@@ -793,9 +720,19 @@ function syncStyle() {
     beatScale: "×",
     hitDuration: " 秒",
     effectIntensity: "×",
+    markerScale: "×",
   }))
     $(key + "Value").value = state.style[key] + suffix;
-  const meet = state.style.motion === "meet";
+  const meet =
+    state.style.motion === "meet" || state.style.trackType === "converge";
+  $("motion").disabled = state.style.trackType === "converge";
+  $("loudnessControls").hidden = state.style.colorMode !== "loudness";
+  $("dbFloor").value = state.style.dbFloor;
+  $("dbCeiling").value = state.style.dbCeiling;
+  $("markerThumbnail").hidden = !state.style.markerImage;
+  if (state.style.markerImage)
+    $("markerThumbnail").src = state.style.markerImage;
+  else $("markerThumbnail").removeAttribute("src");
   $("marker").disabled = meet;
   $("markerValue").value = meet ? "居中 · 50%" : $("marker").value + "%";
   $("motionHint").textContent = meet
@@ -806,7 +743,7 @@ function syncStyle() {
   for (const b of document.querySelectorAll("[data-palette]")) {
     const palette = PALETTES.find((p) => p.id === b.dataset.palette);
     const selected = colorKeys.every(
-      (key) => palette[key] === state.style[key],
+      (key) => !palette[key] || palette[key] === state.style[key],
     );
     b.classList.toggle("selected", selected);
     b.setAttribute("aria-pressed", selected);
@@ -831,14 +768,30 @@ for (const key of [...colorKeys, ...numericKeys])
       : num(key) / (percentKeys.includes(key) ? 100 : 1);
     syncStyle();
   };
-for (const id of ["pattern", "motion", "hitEffect", "colorMode"])
+for (const id of [
+  "pattern",
+  "motion",
+  "hitEffect",
+  "colorMode",
+  "trackType",
+  "markerPattern",
+])
   $(id).onchange = () => {
     if (id === "pattern" && $(id).value === "custom" && !customPattern) {
       $(id).value = state.style.pattern;
       $("patternFile").click();
       return;
     }
+    if (id === "markerPattern" && $(id).value === "custom" && !customMarker) {
+      $(id).value = state.style.markerPattern;
+      $("markerFile").click();
+      return;
+    }
     state.style[id] = $(id).value;
+    if (id === "trackType" && state.style.trackType === "converge") {
+      state.style.motion = "meet";
+      state.style.pattern = "bar";
+    }
     syncStyle();
   };
 async function loadPattern(data) {
@@ -862,7 +815,20 @@ async function loadPattern(data) {
     throw Error("图片边长不能超过 4096 px");
   return image;
 }
-$("patternFile").onchange = async (event) => {
+for (const id of ["dbFloor", "dbCeiling"])
+  $(id).onchange = () => {
+    const value = num(id);
+    if (!Number.isFinite(value)) {
+      syncStyle();
+      return;
+    }
+    state.style[id] =
+      id === "dbFloor"
+        ? clamp(value, -96, Math.min(-6, state.style.dbCeiling - 1))
+        : clamp(value, Math.max(-24, state.style.dbFloor + 1), 0);
+    syncStyle();
+  };
+async function uploadPattern(event, marker = false) {
   const file = event.target.files[0];
   try {
     if (!file) return;
@@ -876,17 +842,25 @@ $("patternFile").onchange = async (event) => {
       reader.readAsDataURL(file);
     });
     const image = await loadPattern(data);
-    state.style.patternImage = data;
-    customPattern = image;
-    state.style.pattern = "custom";
+    if (marker) {
+      state.style.markerImage = data;
+      customMarker = image;
+      state.style.markerPattern = "custom";
+    } else {
+      state.style.patternImage = data;
+      customPattern = image;
+      state.style.pattern = "custom";
+    }
     syncStyle();
-    toast("自定义鼓点图案已应用");
+    toast(marker ? "自定义命中标记已应用" : "自定义鼓点图案已应用");
   } catch (error) {
     toast("图案上传失败：" + error.message, true);
   } finally {
     event.target.value = "";
   }
-};
+}
+$("patternFile").onchange = (event) => uploadPattern(event);
+$("markerFile").onchange = (event) => uploadPattern(event, true);
 document.querySelectorAll("[data-color]").forEach(
   (b) =>
     (b.onclick = () => {
@@ -897,6 +871,7 @@ document.querySelectorAll("[data-color]").forEach(
 $("resetStyle").onclick = () => {
   state.style = { ...defaults };
   customPattern = null;
+  customMarker = null;
   syncStyle();
 };
 $("previewMode").onchange = () => {
@@ -910,6 +885,7 @@ $("resolution").onchange = resizePreview;
 const demoBeats = Array.from({ length: 10 }, (_, i) => ({
   time: i * 0.75,
   strength: [1, 0.65, 0.85, 0.5][i % 4],
+  loudnessDb: [-8, -24, -16, -40][i % 4],
 }));
 function drawStyleDemo(now) {
   const canvas = $("stylePreview"),
@@ -928,6 +904,7 @@ function drawStyleDemo(now) {
     time,
     { ...state.style, position: 0.5, barHeight: 30, barWidth: 0.9 },
     customPattern,
+    customMarker,
   );
 }
 renderStyleChoices();
@@ -976,17 +953,43 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
+const exportDestination = createExportDestination({
+  location: $("saveLocation"),
+  choose: $("chooseExportDirectory"),
+  note: $("saveLocationNote"),
+  toast,
+});
+function updateExportName() {
+  const mode = document.querySelector("input[name=mode]:checked").value;
+  $("exportFilenameHint").textContent =
+    "将保存为：" + exportFilename($("exportName").value, mode);
+}
+$("exportName").oninput = updateExportName;
+for (const input of document.querySelectorAll("input[name=mode]"))
+  input.onchange = updateExportName;
 $("openExport").onclick = () => {
-  if (requireMedia()) $("exportDialog").showModal();
+  if (requireMedia()) {
+    updateExportName();
+    $("exportDialog").showModal();
+  }
 };
-$("startExport").onclick = () => {
-  if (!requireMedia()) return;
+$("startExport").onclick = async () => {
+  if (!requireMedia() || state.busy) return;
   if (!state.beats.length) {
     toast("请先添加拍点再导出", true);
     return;
   }
-  const [width, height] = outputSize();
-  const mode = document.querySelector("input[name=mode]:checked").value;
+  const [width, height] = outputSize(),
+    mode = document.querySelector("input[name=mode]:checked").value;
+  const filename = exportFilename($("exportName").value, mode);
+  let plan;
+  try {
+    plan = await exportDestination.prepare(filename, mode);
+  } catch (error) {
+    if (error.name !== "AbortError")
+      toast("无法选择保存位置：" + error.message, true);
+    return;
+  }
   $("exportDialog").close();
   pausePlayback();
   startJob(
@@ -996,6 +999,7 @@ $("startExport").onclick = () => {
       beats: snapshot(),
       style: { ...state.style },
       mode,
+      filename: plan.filename,
       width: Math.floor(width / 2) * 2,
       height: Math.floor(height / 2) * 2,
       fps: num("fps"),
@@ -1007,17 +1011,35 @@ $("startExport").onclick = () => {
       a.download = result.filename;
       a.textContent = "下载 " + result.filename;
       a.className = "button primary";
-      const panel = $("downloads");
+      const panel = $("downloads"),
+        row = document.createElement("div");
       panel.hidden = false;
-      const row = document.createElement("div");
       row.className = "download-row";
       row.append(a);
       panel.prepend(row);
-      toast("导出完成，请点击右下角下载视频");
+      if (plan.handle || plan.directory) {
+        const status = document.createElement("small");
+        status.textContent = "正在保存到所选位置…";
+        row.append(status);
+        exportDestination
+          .save(result, plan)
+          .then((name) => {
+            status.textContent = "已保存：" + name;
+            toast("导出并保存完成：" + name);
+          })
+          .catch((error) => {
+            status.textContent = "保存未完成，可点击下载重试";
+            toast(
+              "保存失败：" + error.message + "；渲染结果仍在下载列表中。",
+              true,
+            );
+          });
+      } else toast("导出完成，请点击右下角下载视频");
     },
     "正在渲染 " + (mode === "transparent" ? "透明 WebM" : "MP4"),
   );
 };
+updateExportName();
 function download(data, name) {
   const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
@@ -1042,6 +1064,11 @@ function project() {
     beats: snapshot(),
     style: { ...state.style },
     bpm: num("bpm"),
+    exportSettings: {
+      filename: $("exportName").value,
+      resolution: $("resolution").value,
+      fps: num("fps"),
+    },
   };
 }
 $("saveProject").onclick = () => {
@@ -1111,6 +1138,9 @@ async function applyProject(p) {
     hitDuration: [0.15, 1.2],
     effectIntensity: [0.25, 2],
     beatScale: [0.5, 1.5],
+    markerScale: [0.5, 2],
+    dbFloor: [-96, -6],
+    dbCeiling: [-24, 0],
   };
   for (const [key, [a, b]] of Object.entries(ranges)) {
     const v = Number(p.style?.[key]);
@@ -1128,18 +1158,49 @@ async function applyProject(p) {
     /^data:image\/(png|jpeg|webp);base64,/.test(p.style.patternImage)
   )
     style.patternImage = p.style.patternImage;
-  if (["solid", "alternate", "strength"].includes(p.style?.colorMode))
+  if (
+    ["solid", "alternate", "strength", "loudness"].includes(p.style?.colorMode)
+  )
     style.colorMode = p.style.colorMode;
+  if (["classic", "converge"].includes(p.style?.trackType))
+    style.trackType = p.style.trackType;
+  if (
+    ["line", "circle", "diamond", "star", "heart", "custom"].includes(
+      p.style?.markerPattern,
+    )
+  )
+    style.markerPattern = p.style.markerPattern;
+  if (style.dbCeiling <= style.dbFloor) style.dbFloor = style.dbCeiling - 1;
+  if (typeof p.style?.markerImage === "string")
+    style.markerImage = p.style.markerImage;
+  const markerImage = style.markerImage
+    ? await loadPattern(style.markerImage)
+    : null;
+  if (style.markerPattern === "custom" && !markerImage)
+    throw Error("项目缺少命中标记图片");
   const image = style.patternImage
     ? await loadPattern(style.patternImage)
     : null;
   if (style.pattern === "custom" && !image)
     throw Error("项目缺少自定义鼓点图案");
   customPattern = image;
+  customMarker = markerImage;
   replaceBeats(p.beats);
   state.style = style;
   syncStyle();
   if (Number.isFinite(p.bpm)) $("bpm").value = clamp(p.bpm, 20, 400);
+  if (typeof p.exportSettings?.filename === "string")
+    $("exportName").value = p.exportSettings.filename.slice(0, 100);
+  if (
+    [...$("resolution").options].some(
+      (o) => o.value === p.exportSettings?.resolution,
+    )
+  )
+    $("resolution").value = p.exportSettings.resolution;
+  if ([24, 30, 60].includes(p.exportSettings?.fps))
+    $("fps").value = p.exportSettings.fps;
+  updateExportName();
+  resizePreview();
   toast("项目已恢复");
 }
 $("projectFile").onchange = async (e) => {

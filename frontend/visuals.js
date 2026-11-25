@@ -16,6 +16,13 @@ export const DEFAULT_STYLE = Object.freeze({
   effectIntensity: 1,
   beatScale: 1,
   patternImage: null,
+  trackType: "classic",
+  markerPattern: "line",
+  markerColor: "#ffffff",
+  markerScale: 1,
+  markerImage: null,
+  dbFloor: -48,
+  dbCeiling: -6,
 });
 
 export const PALETTES = [
@@ -71,6 +78,7 @@ export const PALETTES = [
 
 export const PATTERNS = [
   { id: "circle", name: "圆点", icon: "●" },
+  { id: "bar", name: "竖线", icon: "┃" },
   { id: "diamond", name: "菱形", icon: "◆" },
   { id: "triangle", name: "三角", icon: "▲" },
   { id: "star", name: "星芒", icon: "✦" },
@@ -101,7 +109,25 @@ export function mixColor(from, to, amount) {
   );
 }
 
-export function beatColor(style, index, strength, side = 0) {
+export function loudnessAmount(style, strength, loudnessDb) {
+  const db = Number.isFinite(loudnessDb)
+    ? loudnessDb
+    : 20 * Math.log10(Math.max(0.001, strength));
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      (db - style.dbFloor) / Math.max(1, style.dbCeiling - style.dbFloor),
+    ),
+  );
+}
+export function beatColor(style, index, strength, side = 0, loudnessDb) {
+  if (style.colorMode === "loudness")
+    return mixColor(
+      "#101418",
+      style.color,
+      0.2 + 0.8 * loudnessAmount(style, strength, loudnessDb),
+    );
   if (style.colorMode === "strength")
     return mixColor(style.secondaryColor, style.color, strength);
   if (style.colorMode === "alternate")
@@ -115,6 +141,14 @@ export function drawShape(ctx, pattern, x, y, r) {
   ctx.beginPath();
   if (pattern === "circle" || pattern === "custom")
     ctx.arc(x, y, r, 0, Math.PI * 2);
+  else if (pattern === "bar")
+    ctx.roundRect(
+      x - r * 0.16,
+      y - r,
+      Math.max(1, r * 0.32),
+      r * 2,
+      Math.max(1, r * 0.16),
+    );
   else if (pattern === "pill")
     ctx.roundRect(x - r, y - r * 0.7, r * 2, r * 1.4, Math.max(1, r * 0.7));
   else {
@@ -201,7 +235,9 @@ export function drawTrack(
   time,
   style,
   image = null,
+  markerImage = null,
 ) {
+  if (style.trackType === "converge") style = { ...style, motion: "meet" };
   const bw = width * style.barWidth,
     left = (width - bw) / 2;
   const y = height * style.position,
@@ -219,6 +255,16 @@ export function drawTrack(
   ctx.beginPath();
   ctx.roundRect(left, y - bh / 2, bw, bh, Math.min(6, bh / 3));
   ctx.fill();
+  if (style.trackType === "converge") {
+    ctx.strokeStyle = mixColor(style.barColor, style.color, 0.22);
+    ctx.lineWidth = 1;
+    for (const offset of [-0.25, 0.25]) {
+      ctx.beginPath();
+      ctx.moveTo(left, y + bh * offset);
+      ctx.lineTo(left + bw, y + bh * offset);
+      ctx.stroke();
+    }
+  }
   ctx.save();
   ctx.beginPath();
   ctx.rect(left, y - bh / 2, bw, bh);
@@ -229,7 +275,7 @@ export function drawTrack(
     if (delta < 0) continue;
     const r = bh * 0.3 * (0.55 + 0.45 * beat.strength) * style.beatScale;
     beatPositions(style, left, bw, marker, r, delta).forEach((x, side) => {
-      ctx.fillStyle = beatColor(style, i, beat.strength, side);
+      ctx.fillStyle = beatColor(style, i, beat.strength, side, beat.loudnessDb);
       if (style.pattern === "custom" && image?.complete && image.naturalWidth) {
         const scale = Math.min(
           (r * 2) / image.naturalWidth,
@@ -237,7 +283,11 @@ export function drawTrack(
         );
         const w = image.naturalWidth * scale,
           h = image.naturalHeight * scale;
+        ctx.save();
+        if (style.colorMode === "loudness")
+          ctx.filter = `brightness(${0.2 + 0.8 * loudnessAmount(style, beat.strength, beat.loudnessDb)})`;
         ctx.drawImage(image, x - w / 2, y - h / 2, w, h);
+        ctx.restore();
       } else drawShape(ctx, style.pattern, x, y, r);
     });
   }
@@ -252,7 +302,7 @@ export function drawTrack(
       const color =
         style.colorMode === "alternate" && style.motion === "meet"
           ? mixColor(style.color, style.secondaryColor, 0.5)
-          : beatColor(style, i, beat.strength);
+          : beatColor(style, i, beat.strength, 0, beat.loudnessDb);
       ctx.save();
       ctx.globalAlpha = Math.min(
         1,
@@ -284,6 +334,25 @@ export function drawTrack(
       }
       ctx.restore();
     }
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(marker - 1, y - bh * 0.7, 2, bh * 1.4);
+  ctx.fillStyle = style.markerColor;
+  const markerSize = bh * 1.4 * style.markerScale;
+  if (
+    style.markerPattern === "custom" &&
+    markerImage?.complete &&
+    markerImage.naturalWidth
+  ) {
+    const factor =
+      markerSize /
+      Math.max(markerImage.naturalWidth, markerImage.naturalHeight);
+    const w = markerImage.naturalWidth * factor,
+      h = markerImage.naturalHeight * factor;
+    ctx.drawImage(markerImage, marker - w / 2, y - h / 2, w, h);
+  } else if (style.markerPattern === "line")
+    ctx.fillRect(
+      marker - style.markerScale,
+      y - markerSize / 2,
+      2 * style.markerScale,
+      markerSize,
+    );
+  else drawShape(ctx, style.markerPattern, marker, y, markerSize / 2);
 }
