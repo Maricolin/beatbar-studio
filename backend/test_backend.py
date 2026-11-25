@@ -221,9 +221,93 @@ class BeatBarIntegrationTests(unittest.TestCase):
         self.assertIn("Video:", probe_text)
         self.assertIn("Audio:", probe_text)
 
+    def test_audio_palette_background_and_silent_video_exports(self):
+        cases = [(self.media, "composite", "heart", "flash"),
+                 (self.media, "green", "hexagon", "burst"),
+                 (self.media, "transparent", "star", "ring"),
+                 (self.silent_media, "composite", "diamond", "burst")]
+        for source, mode, pattern, effect in cases:
+            with self.subTest(source=source["hasVideo"], mode=mode):
+                body = {"mediaId": source["id"], "mode": mode, "width": 160, "height": 90,
+                        "fps": 10, "includeAudio": True, "beats": [{"time": 0.5, "strength": 1}],
+                        "style": {"pattern": pattern, "hitEffect": effect, "motion": "meet",
+                                  "colorMode": "alternate", "backgroundColor": "#101a25",
+                                  "color": "#67dce8", "secondaryColor": "#c4a0ff",
+                                  "hitDuration": 0.7, "effectIntensity": 1.5, "beatScale": 1.2}}
+                response = self.client.post("/api/export", json=body)
+                self.assertEqual(response.status_code, 202, response.text)
+                job = self._wait_job(response.json()["id"])
+                self.assertEqual(job["status"], "done", job)
+                path = Path(os.environ["BEATBAR_DATA_DIR"]) / "exports" / job["result"]["filename"]
+                probe = subprocess.run([FFMPEG, "-hide_banner", "-i", str(path), "-t", "0", "-f", "null", "-"], capture_output=True, timeout=15)
+                text = probe.stderr.decode("utf-8", "replace")
+                self.assertEqual("Audio:" in text, source["hasAudio"], text)
+                if source is self.media and mode == "composite":
+                    decoded = subprocess.run([FFMPEG, "-v", "error", "-i", str(path), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], capture_output=True, check=True, timeout=15).stdout
+                    self.assertLess(max(abs(actual-target) for actual, target in zip(decoded[:3], (16, 26, 37))), 12)
+
+    def test_invalid_custom_image_is_rejected_before_job(self):
+        response = self.client.post("/api/export", json={"mediaId": self.media["id"], "style": {"pattern": "custom", "patternImage": "data:image/png;base64,bm90LWFuLWltYWdl"}, "width": 160, "height": 90, "fps": 10})
+        self.assertEqual(response.status_code, 422, response.text)
+
     def test_export_rejects_unknown_visual_style(self):
         response = self.client.post("/api/export", json={"mediaId": self.media["id"], "style": {"pattern": "made-up"}, "mode": "green", "width": 160, "height": 90, "fps": 10})
         self.assertEqual(response.status_code, 422, response.text)
+
+
+class VisualRendererTests(unittest.TestCase):
+    def render(self, time=0, **style):
+        values = {"position": 0.5, "barWidth": 0.8, "barHeight": 30, "speed": 2,
+                  "marker": 0.25, "color": "#ff0000", "secondaryColor": "#0000ff",
+                  "barColor": "#222222", "hitEffect": "none", **style}
+        return backend_main._render_overlay(400, 200, [backend_main.Beat(time=1, strength=1)], time, backend_main.Style(**values))
+
+    def test_meet_has_symmetric_different_colors(self):
+        frame = self.render(motion="meet", colorMode="alternate")
+        self.assertEqual(frame.getpixel((125, 100)), (255, 0, 0, 255))
+        self.assertEqual(frame.getpixel((275, 100)), (0, 0, 255, 255))
+        self.assertEqual(frame.getpixel((200, 100)), (255, 255, 255, 255))
+        arrived = self.render(time=1, motion="meet", colorMode="alternate")
+        self.assertEqual(arrived.getpixel((125, 100)), (34, 34, 34, 255))
+        self.assertEqual(arrived.getpixel((205, 100)), (0, 0, 255, 255))
+
+    def test_left_motion_uses_marker_distance(self):
+        frame = self.render(motion="left-right")
+        self.assertEqual(frame.getpixel((80, 100)), (255, 0, 0, 255))
+        self.assertEqual(frame.getpixel((120, 100)), (255, 255, 255, 255))
+
+    def test_effect_extends_above_track_and_expires(self):
+        for effect in ("ring", "flash", "burst"):
+            with self.subTest(effect=effect):
+                active = self.render(time=1.2, hitEffect=effect, hitDuration=0.8, effectIntensity=2)
+                expired = self.render(time=1.9, hitEffect=effect, hitDuration=0.8, effectIntensity=2)
+                self.assertIsNotNone(active.crop((124, 50, 160, 84)).getbbox())
+                self.assertIsNone(expired.crop((124, 50, 160, 84)).getbbox())
+                self.assertEqual(active.getpixel((45, 100))[3], 255, "effects must not erase the opaque track")
+
+    def test_new_shapes_are_distinct_and_scale_changes_size(self):
+        heart = self.render(pattern="heart")
+        hexagon = self.render(pattern="hexagon")
+        self.assertNotEqual(heart.tobytes(), hexagon.tobytes())
+        small = self.render(beatScale=0.5)
+        large = self.render(beatScale=1.5)
+        red_pixels = lambda im: sum(pixel[:3] == (255, 0, 0) for pixel in im.getdata())
+        self.assertGreater(red_pixels(large), red_pixels(small)*2)
+
+    def test_style_validation(self):
+        for value in ({"color": "oops"}, {"secondaryColor": "no"}, {"backgroundColor": "bad"},
+                      {"colorMode": "rainbow"}, {"hitDuration": 0}, {"beatScale": 4},
+                      {"effectIntensity": 3}, {"pattern": "custom"}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                backend_main.Style(**value)
+        self.assertEqual(backend_main._beat_color(backend_main.Style(color="#ff0000", secondaryColor="#0000ff", colorMode="strength"), 0, 0.5), (128, 0, 128))
+
+    def test_custom_stamp_keeps_aspect_and_alpha(self):
+        style = backend_main.Style(pattern="custom", patternImage="unused", barHeight=40, position=0.5, marker=0.25, speed=2, barWidth=0.8, hitEffect="none")
+        image = Image.new("RGBA", (40, 10), (20, 210, 80, 255))
+        frame = backend_main._render_overlay(400, 200, [backend_main.Beat(time=1, strength=1)], 0, style, image)
+        self.assertEqual(frame.getpixel((240, 100))[:3], (20, 210, 80))
+        self.assertNotEqual(frame.getpixel((240, 108))[:3], (20, 210, 80))
 
 
 if __name__ == "__main__":

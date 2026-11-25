@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 import uuid
+from bisect import bisect_left, bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,8 +23,8 @@ import numpy as np
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageDraw
-from pydantic import BaseModel, Field, field_validator
+from PIL import Image, ImageDraw, ImageOps
+from pydantic import BaseModel, Field, field_validator, model_validator
 from scipy.signal import butter, find_peaks, sosfiltfilt, stft
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -207,7 +208,7 @@ def upload_media(file: UploadFile = File(...)) -> dict[str, Any]:
     name = _safe_name(file.filename)
     media_id = uuid.uuid4().hex
     suffix = Path(name).suffix.lower()
-    if not re.fullmatch(r"\\.[a-z0-9]{1,10}", suffix):
+    if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
         suffix = ".media"
     path = media_dir() / f"{media_id}{suffix}"
     total = 0
@@ -455,6 +456,9 @@ class Beat(BaseModel):
 
 class Style(BaseModel):
     color: str = "#ffffff"
+    secondaryColor: str = "#67dce8"
+    backgroundColor: str = "#111820"
+    colorMode: str = "solid"
     barColor: str = "#222222"
     position: float = Field(0.5, ge=0, le=1)
     barWidth: float = Field(0.7, gt=0, le=1)
@@ -464,12 +468,34 @@ class Style(BaseModel):
     pattern: str = "circle"
     motion: str = "right-left"
     hitEffect: str = "ring"
+    hitDuration: float = Field(0.45, ge=0.15, le=1.2)
+    effectIntensity: float = Field(1.0, ge=0.25, le=2)
+    beatScale: float = Field(1.0, ge=0.5, le=1.5)
     patternImage: str | None = Field(None, max_length=2_800_000)
+
+    @field_validator("color", "secondaryColor", "backgroundColor", "barColor")
+    @classmethod
+    def valid_color(cls, value: str):
+        _parse_color(value)
+        return value
+
+    @field_validator("colorMode")
+    @classmethod
+    def valid_color_mode(cls, value: str):
+        if value not in {"solid", "alternate", "strength"}:
+            raise ValueError("不支持的鼓点颜色模式。")
+        return value
+
+    @model_validator(mode="after")
+    def custom_pattern_has_image(self):
+        if self.pattern == "custom" and not self.patternImage:
+            raise ValueError("请先上传自定义鼓点图案。")
+        return self
 
     @field_validator("pattern")
     @classmethod
     def valid_pattern(cls, value: str):
-        if value not in {"circle", "diamond", "triangle", "star", "pill", "custom"}:
+        if value not in {"circle", "diamond", "triangle", "star", "pill", "hexagon", "heart", "custom"}:
             raise ValueError("不支持的鼓点图案。")
         return value
 
@@ -483,7 +509,7 @@ class Style(BaseModel):
     @field_validator("hitEffect")
     @classmethod
     def valid_hit_effect(cls, value: str):
-        if value not in {"ring", "flash", "none"}:
+        if value not in {"ring", "flash", "burst", "none"}:
             raise ValueError("不支持的命中动效。")
         return value
 
@@ -538,7 +564,7 @@ def _load_pattern_image(data: str | None) -> Image.Image | None:
         if image.width > 4096 or image.height > 4096:
             raise ValueError("自定义图案尺寸不能超过 4096×4096。")
         image.load()
-        image = image.convert("RGBA")
+        image = ImageOps.exif_transpose(image).convert("RGBA")
         image.thumbnail((512, 512), Image.Resampling.LANCZOS)
         return image
     except (OSError, ValueError) as exc:
@@ -559,10 +585,110 @@ def _draw_beat_shape(draw: ImageDraw.ImageDraw, pattern: str, cx: float, cy: flo
             length = r if index % 2 == 0 else r * 0.46
             points.append((int(round(x + math.cos(angle) * length)), int(round(y + math.sin(angle) * length))))
         draw.polygon(points, fill=fill)
+    elif pattern in {"hexagon", "heart"}:
+        points = []
+        for index in range(64 if pattern == "heart" else 6):
+            angle = index * math.pi * 2 / (64 if pattern == "heart" else 6)
+            if pattern == "heart":
+                px = 16 * math.sin(angle) ** 3 / 18
+                py = -(13 * math.cos(angle) - 5 * math.cos(2 * angle) - 2 * math.cos(3 * angle) - math.cos(4 * angle)) / 18
+            else:
+                px, py = math.cos(angle - math.pi / 2), math.sin(angle - math.pi / 2)
+            points.append((x + px * r, y + py * r))
+        draw.polygon(points, fill=fill)
     elif pattern == "pill":
         draw.rounded_rectangle((x-r, y-r*0.7, x+r, y+r*0.7), radius=max(1, int(r*0.7)), fill=fill)
     else:
         draw.ellipse((x-r, y-r, x+r, y+r), fill=fill)
+
+
+def _mix_color(a, b, amount):
+    return tuple(int(math.floor(x + (y-x) * amount + 0.5)) for x, y in zip(a, b))
+
+
+def _beat_color(style: Style, index: int, strength: float, side: int = 0):
+    primary, secondary = _parse_color(style.color), _parse_color(style.secondaryColor)
+    if style.colorMode == "strength":
+        return _mix_color(secondary, primary, strength)
+    if style.colorMode == "alternate":
+        return secondary if (side == 1 if style.motion == "meet" else index % 2 == 1) else primary
+    return primary
+
+
+def _render_overlay(width: int, height: int, beats: list[Beat], t: float, style: Style,
+                    pattern_image: Image.Image | None = None, pattern_cache=None, beat_times=None):
+    """Draw the same track as frontend/visuals.js; effects composite above beats."""
+    frame = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(frame)
+    track_width = width * style.barWidth
+    left = (width - track_width) / 2
+    cy, bar_h = height * style.position, min(height, style.barHeight)
+    marker = left + track_width * (0.5 if style.motion == "meet" else style.marker)
+    x0, x1 = int(round(left)), int(round(left + track_width))
+    y0, y1 = int(round(cy - bar_h/2)), int(round(cy + bar_h/2))
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=min(6, bar_h / 3), fill=(*_parse_color(style.barColor), 255))
+    beat_layer = Image.new("RGBA", (max(1, x1-x0), max(1, y1-y0)), (0, 0, 0, 0))
+    beat_draw = ImageDraw.Draw(beat_layer)
+    cache = pattern_cache if pattern_cache is not None else {}
+    times = beat_times if beat_times is not None else [beat.time for beat in beats]
+    start, end = bisect_left(times, t-style.hitDuration), bisect_right(times, t+style.speed)
+    for index in range(start, end):
+        beat = beats[index]
+        delta = beat.time - t
+        if delta < 0:
+            continue
+        radius = bar_h * 0.3 * (0.55 + 0.45 * beat.strength) * style.beatScale
+        if style.motion == "meet":
+            progress = 1 - delta/style.speed
+            positions = (left + radius + progress * max(0, marker-left-radius),
+                         left + track_width - radius - progress * max(0, left+track_width-radius-marker))
+        elif style.motion == "left-right":
+            positions = (marker - delta/style.speed * track_width * style.marker,)
+        else:
+            positions = (marker + delta/style.speed * track_width * (1-style.marker),)
+        for side, bx in enumerate(positions):
+            if pattern_image is not None and style.pattern == "custom":
+                size = max(2, int(round(radius*2)))
+                stamp = cache.get(size)
+                if stamp is None:
+                    scale = size/max(pattern_image.size)
+                    stamp = pattern_image.resize((max(1, int(round(pattern_image.width*scale))), max(1, int(round(pattern_image.height*scale)))), Image.Resampling.LANCZOS)
+                    cache[size] = stamp
+                beat_layer.alpha_composite(stamp, (int(round(bx-x0-stamp.width/2)), int(round(cy-y0-stamp.height/2))))
+            else:
+                _draw_beat_shape(beat_draw, style.pattern, bx-x0, cy-y0, max(1, int(round(radius))), (*_beat_color(style, index, beat.strength, side), 255))
+    frame.alpha_composite(beat_layer, (x0, y0))
+    if style.hitEffect != "none":
+        for index in range(start, end):
+            beat = beats[index]
+            age = t - beat.time
+            if age < 0 or age >= style.hitDuration:
+                continue
+            progress = age/style.hitDuration
+            radius = bar_h*0.3*(0.55+0.45*beat.strength)*style.beatScale
+            color = (_mix_color(_parse_color(style.color), _parse_color(style.secondaryColor), 0.5)
+                     if style.colorMode == "alternate" and style.motion == "meet" else _beat_color(style, index, beat.strength))
+            alpha = int(round(min(1, (1-progress)*style.effectIntensity*{"ring": 0.85, "flash": 0.3, "burst": 0.9}[style.hitEffect])*255))
+            effect = Image.new("RGBA", frame.size, (0, 0, 0, 0))
+            effect_draw = ImageDraw.Draw(effect)
+            line_width = max(1, int(round(bar_h*0.04)))
+            if style.hitEffect == "burst":
+                inner, length = radius*(1+progress*2), radius*(0.7+progress*1.5)*style.effectIntensity
+                for k in range(8):
+                    angle = k*math.pi/4
+                    effect_draw.line((marker+math.cos(angle)*inner, cy+math.sin(angle)*inner,
+                                      marker+math.cos(angle)*(inner+length), cy+math.sin(angle)*(inner+length)), fill=(*color, alpha), width=line_width)
+            else:
+                er = radius*(1+progress*3*style.effectIntensity)
+                box = (marker-er, cy-er, marker+er, cy+er)
+                if style.hitEffect == "ring":
+                    effect_draw.ellipse(box, outline=(*color, alpha), width=line_width)
+                else:
+                    effect_draw.ellipse(box, fill=(*color, alpha))
+            frame = Image.alpha_composite(frame, effect)
+    draw = ImageDraw.Draw(frame)
+    draw.line((int(round(marker)), cy-bar_h*0.7, int(round(marker)), cy+bar_h*0.7), fill=(255,255,255,255), width=2)
+    return frame
 
 
 def _output_path(job: Job, mode: str) -> tuple[Path, str]:
@@ -578,8 +704,7 @@ def _ffmpeg_export(media: Media, req: ExportRequest, job: Job, output: Path, dur
     if frame_count > MAX_EXPORT_FRAMES or frame_count * width * height > MAX_EXPORT_PIXEL_FRAMES:
         raise ValueError(f"导出资源超限：最多 {MAX_EXPORT_FRAMES} 帧且总像素帧不超过 {MAX_EXPORT_PIXEL_FRAMES:,}。请降低分辨率、帧率或媒体时长。")
     bg_color = (0, 255, 0) if req.mode == "green" else (0, 0, 0)
-    beat_color = _parse_color(req.style.color)
-    bar_color = _parse_color(req.style.barColor)
+    canvas_color = "0x" + "".join(f"{v:02x}" for v in _parse_color(req.style.backgroundColor))
     pattern_image = _load_pattern_image(req.style.patternImage)
     if req.style.pattern == "custom" and pattern_image is None:
         raise ValueError("请先上传自定义鼓点图案。")
@@ -587,7 +712,7 @@ def _ffmpeg_export(media: Media, req: ExportRequest, job: Job, output: Path, dur
     if req.mode == "composite":
         # The source stays input 0; source audio can be muxed without exposing any shell interpolation.
         base_filter = (f"[0:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                       f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}[base];") if media.has_video else f"color=c=black:s={width}x{height}:r={fps}:d={duration:.6f}[base];"
+                       f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}[base];") if media.has_video else f"color=c={canvas_color}:s={width}x{height}:r={fps}:d={duration:.6f}[base];"
         graph = base_filter + f"[1:v:0]format=rgba[ov];[base][ov]overlay=shortest=1:format=auto[v]"
         args = [FFMPEG, "-hide_banner", "-loglevel", "error", "-i", str(media.path), *raw_input,
                 "-filter_complex", graph, "-map", "[v]"]
@@ -629,67 +754,18 @@ def _ffmpeg_export(media: Media, req: ExportRequest, job: Job, output: Path, dur
     stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
     stderr_thread.start()
     assert proc.stdin is not None
-    track_width = max(1, int(round(width * req.style.barWidth)))
-    left = (width - track_width) / 2
-    cy = height * req.style.position
-    bar_h = min(height, req.style.barHeight)
-    marker_x = left + (track_width / 2 if req.style.motion == "meet" else track_width * req.style.marker)
-    base_radius = bar_h * 0.30
-    beats = req.beats
     pattern_cache: dict[int, Image.Image] = {}
+    beat_times = [beat.time for beat in req.beats]
     try:
         for index in range(frame_count):
             if job.cancel_event.is_set():
                 raise RuntimeError("Cancelled")
             t = index / fps
-            frame = Image.new("RGBA", (width, height), (*bg_color, 255) if req.mode == "green" else (0, 0, 0, 0))
-            draw = ImageDraw.Draw(frame, "RGBA")
-            x0, x1 = int(round(left)), int(round(left + track_width))
-            y0, y1 = max(0, int(round(cy - bar_h/2))), min(height, int(round(cy + bar_h/2)))
-            draw.rounded_rectangle((x0, y0, x1, y1), radius=min(6, bar_h // 2), fill=(*bar_color, 255))
-            # Render beats into a local transparent layer so circles clip at the track edges.
-            clip_w, clip_h = max(1, x1-x0), max(1, y1-y0)
-            beat_layer = Image.new("RGBA", (clip_w, clip_h), (0, 0, 0, 0))
-            beat_draw = ImageDraw.Draw(beat_layer, "RGBA")
-            for beat in beats:
-                delta = beat.time - t
-                radius = max(1, int(round(base_radius * (0.55 + 0.45 * beat.strength))))
-                if -0.08 <= delta <= req.style.speed:
-                    if req.style.motion == "meet":
-                        if delta >= 0:
-                            progress = 1 - delta / req.style.speed
-                            left_x = x0 + radius + progress * max(0, marker_x - x0 - radius)
-                            right_x = x1 - radius - progress * max(0, x1 - radius - marker_x)
-                            positions = (left_x, right_x)
-                        else:
-                            positions = (marker_x,)
-                    elif req.style.motion == "left-right":
-                        positions = (marker_x - (delta / req.style.speed) * track_width * (1 - req.style.marker),)
-                    else:
-                        positions = (marker_x + (delta / req.style.speed) * track_width * (1 - req.style.marker),)
-                    for bx in positions:
-                        if left - radius <= bx <= left + track_width + radius:
-                            if pattern_image is not None and req.style.pattern == "custom":
-                                size = max(2, radius * 2)
-                                stamp = pattern_cache.get(size)
-                                if stamp is None:
-                                    stamp = pattern_image.resize((size, size), Image.Resampling.LANCZOS)
-                                    pattern_cache[size] = stamp
-                                beat_layer.alpha_composite(stamp, (int(round(bx - x0)) - size // 2, int(round(cy - y0)) - size // 2))
-                            else:
-                                _draw_beat_shape(beat_draw, req.style.pattern, bx - x0, cy - y0, radius, (*beat_color, 255))
-                age = -delta
-                if req.style.hitEffect != "none" and 0 <= age < 0.42:
-                    progress = age / 0.42
-                    effect_radius = max(2, int(round(radius * (1 + progress * 3))))
-                    alpha = max(0, int((1 - progress) * (110 if req.style.hitEffect == "ring" else 48)))
-                    if req.style.hitEffect == "flash":
-                        draw.ellipse((marker_x-effect_radius, cy-effect_radius, marker_x+effect_radius, cy+effect_radius), fill=(*beat_color, alpha))
-                    else:
-                        draw.ellipse((marker_x-effect_radius, cy-effect_radius, marker_x+effect_radius, cy+effect_radius), outline=(*beat_color, alpha), width=max(1, int(round(bar_h*0.04))))
-            frame.alpha_composite(beat_layer, (x0, y0))
-            marker_half = int(round(bar_h * 0.7))
-            draw.line((int(round(marker_x)), max(0, int(round(cy))-marker_half), int(round(marker_x)), min(height-1, int(round(cy))+marker_half)), fill=(255,255,255,255), width=2)
+            frame = _render_overlay(width, height, req.beats, t, req.style, pattern_image, pattern_cache, beat_times)
+            if req.mode == "green":
+                base = Image.new("RGBA", (width, height), (*bg_color, 255))
+                base.alpha_composite(frame)
+                frame = base
             try:
                 proc.stdin.write(frame.tobytes())
             except (BrokenPipeError, OSError) as exc:

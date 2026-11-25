@@ -1088,20 +1088,230 @@ canvas:focus-visible {
   }
 }
 .audio-visual {
-  position: absolute; inset: 0; display: none; z-index: 0;
-  align-items: center; justify-content: center; flex-direction: column; gap: 18px;
-  overflow: hidden; color: var(--accent);
-  background: radial-gradient(ellipse at 50% 55%, color-mix(in srgb, var(--accent) 17%, #151a1d), #111518 70%);
+  position: absolute;
+  inset: 0;
+  display: none;
+  z-index: 0;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  overflow: hidden;
+  color: var(--accent);
+  background: radial-gradient(
+    ellipse at 50% 55%,
+    color-mix(in srgb, var(--accent) 17%, #151a1d),
+    #111518 70%
+  );
 }
-.stage.audio-only video { display: none; }
-.stage.audio-only .audio-visual { display: flex; }
-.audio-visual > span:last-child { color: #b0bdb0; font-size: 11px; letter-spacing: 2px; }
-.audio-visual-label { color: color-mix(in srgb, var(--accent) 70%, white); font: 700 9px monospace; letter-spacing: 4px; }
-.audio-bars { display:flex; align-items:center; justify-content:center; gap:clamp(3px, .8vw, 10px); width:min(66%, 520px); height:34%; }
-.audio-bars i { width:4%; height:24%; min-width:3px; border-radius:99px; background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 55%,white),var(--accent)); opacity:.76; box-shadow:0 0 20px color-mix(in srgb,var(--accent) 38%,transparent); animation:audioPulse 900ms ease-in-out infinite alternate; }
-.audio-bars i:nth-child(5n+1){animation-delay:-.18s}.audio-bars i:nth-child(5n+2){animation-delay:-.57s}.audio-bars i:nth-child(5n+3){animation-delay:-.34s}.audio-bars i:nth-child(5n+4){animation-delay:-.73s}
-@keyframes audioPulse { from { transform:scaleY(.42); opacity:.42; } to { transform:scaleY(2.8); opacity:.96; } }
-.pattern-upload { margin-top:10px !important; border:1px dashed #485341 !important; }
-.pattern-upload input[hidden] { display:none !important; }
-.pattern-hint { margin-top:6px !important; }
-@media (prefers-reduced-motion: reduce) { .audio-bars i { animation:none; } }
+.stage.audio-only video {
+  display: none;
+}
+.stage.audio-only .audio-visual {
+  display: flex;
+}
+.audio-visual > span:last-child {
+  color: #b0bdb0;
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+.audio-visual-label {
+  color: color-mix(in srgb, var(--accent) 70%, white);
+  font: 700 9px monospace;
+  letter-spacing: 4px;
+}
+.audio-bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(3px, 0.8vw, 10px);
+  width: min(66%, 520px);
+  height: 34%;
+}
+.audio-bars i {
+  width: 4%;
+  height: 24%;
+  min-width: 3px;
+  border-radius: 99px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 55%, white),
+    var(--accent)
+  );
+  opacity: 0.76;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 38%, transparent);
+  animation: audioPulse 900ms ease-in-out infinite alternate;
+}
+.audio-bars i:nth-child(5n + 1) {
+  animation-delay: -0.18s;
+}
+.audio-bars i:nth-child(5n + 2) {
+  animation-delay: -0.57s;
+}
+.audio-bars i:nth-child(5n + 3) {
+  animation-delay: -0.34s;
+}
+.audio-bars i:nth-child(5n + 4) {
+  animation-delay: -0.73s;
+}
+@keyframes audioPulse {
+  from {
+    transform: scaleY(0.42);
+    opacity: 0.42;
+  }
+  to {
+    transform: scaleY(2.8);
+    opacity: 0.96;
+  }
+}
+.pattern-upload {
+  margin-top: 10px !important;
+  border: 1px dashed #485341 !important;
+}
+.pattern-upload input[hidden] {
+  display: none !important;
+}
+.pattern-hint {
+  margin-top: 6px !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .audio-bars i {
+    animation: none;
+  }
+}
+
+/* The visual controls retain the studio layout and show the actual renderer. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.palette-grid button {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 10px;
+  min-width: 0;
+}
+.palette-colors {
+  display: flex;
+  width: 100%;
+  height: 15px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #ffffff15;
+}
+.palette-colors i {
+  flex: 1;
+}
+.palette-grid .selected,
+.pattern-grid .selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, #20252a);
+}
+.pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.pattern-grid button {
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 2px;
+  min-width: 0;
+  font-size: 9px;
+}
+.pattern-grid b {
+  font-size: 21px;
+  line-height: 24px;
+  color: var(--accent);
+}
+.style-demo {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  background: #111820;
+}
+.style-demo > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 10px;
+  color: #bbc3cd;
+  font-size: 10px;
+}
+.style-demo small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.style-demo canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.pattern-upload {
+  white-space: normal;
+}
+#patternThumbnail {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: repeating-conic-gradient(#30363e 0 25%, #20262e 0 50%) 0/8px 8px;
+}
+.preview-media-mode {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  font-size: 9px;
+  color: #d0d9e2;
+  background: #111820b8;
+  border: 1px solid #ffffff14;
+  border-radius: 4px;
+  padding: 5px 8px;
+  pointer-events: none;
+}
+.stage.audio-only .audio-visual {
+  display: none;
+}
+#hitControls .field-head {
+  margin-top: 18px;
+}
+button:focus-visible,
+.button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (min-width: 801px) and (max-width: 1200px) {
+  .style-panel {
+    display: block;
+    columns: 3;
+    column-gap: 25px;
+  }
+  .style-panel > * {
+    break-inside: avoid;
+  }
+  .style-panel .panel-heading {
+    column-span: all;
+  }
+  .style-panel .style-demo {
+    column-span: all;
+    max-width: 440px;
+    margin: 0 auto 20px;
+  }
+}

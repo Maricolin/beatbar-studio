@@ -9,3 +9,10 @@ beatbar-fixture-*/
 beatbar-test-*/
 beatbar-sample-clicks.wav
 pip-unpack-*/
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+.dsh-diagnostics/
+.env
+.env.*
+!.env.example

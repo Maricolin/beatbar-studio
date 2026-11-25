@@ -1,21 +1,11 @@
+import { DEFAULT_STYLE, PALETTES, PATTERNS, drawTrack } from "./visuals.js";
+
 const $ = (id) => document.getElementById(id);
 const video = $("video"),
   audio = $("audio"),
   timeline = $("timeline"),
   overlay = $("overlay");
-const defaults = {
-  color: "#b7f56c",
-  barColor: "#30363e",
-  position: 0.82,
-  barWidth: 0.8,
-  barHeight: 44,
-  speed: 3,
-  marker: 0.15,
-  pattern: "circle",
-  motion: "right-left",
-  hitEffect: "ring",
-  patternImage: null,
-};
+const defaults = DEFAULT_STYLE;
 const state = {
   media: null,
   beats: [],
@@ -231,13 +221,14 @@ async function upload(file) {
     const m = await api("/api/media", body);
     setMedia(m);
     toast(
-      (m.hasVideo ? "视频" : "音乐") + "已就绪" +
+      (m.hasVideo ? "视频" : "音乐") +
+        "已就绪" +
         (m.hasAudio ? "，可以开始识别音乐" : "；没有音轨，可以手动打点"),
     );
     if (state.pendingProject) {
       const p = state.pendingProject;
       state.pendingProject = null;
-      applyProject(p);
+      await applyProject(p);
     }
   } catch (e) {
     toast("导入失败：" + e.message, true);
@@ -276,10 +267,23 @@ function setMedia(m) {
   $("mediaInfo").hidden = false;
   $("mediaInfo").textContent =
     (m.hasVideo ? m.width + " × " + m.height : "纯音频") +
-    " · " + formatTime(m.duration) + " · " +
+    " · " +
+    formatTime(m.duration) +
+    " · " +
     (m.hasAudio ? "有音轨" : "无音轨");
   $("fillEnd").value = m.duration.toFixed(2);
   resizePreview();
+  syncStyle();
+  $("includeAudio").disabled = !m.hasAudio;
+  $("includeAudio").checked = m.hasAudio;
+  $("resolution").options[0].textContent = m.hasVideo
+    ? "跟随原视频（最长边 1920）"
+    : "音频画布 · 1280 × 720";
+  $("mediaMode").textContent = m.hasVideo
+    ? m.hasAudio
+      ? "视频 + 音轨"
+      : "无音轨视频 · 手动打点"
+    : "纯音乐 · 节奏画布";
   changed();
 }
 $("videoFile").onchange = (e) => upload(e.target.files[0]);
@@ -305,7 +309,12 @@ async function togglePlay() {
       }
       await player.play();
     } catch {
-      toast(state.media?.hasVideo ? "浏览器无法播放该视频编码，请转换为 H.264 MP4 后重试" : "浏览器无法播放该音频编码，请转换为 MP3、AAC 或 WAV 后重试", true);
+      toast(
+        state.media?.hasVideo
+          ? "浏览器无法播放该视频编码，请转换为 H.264 MP4 后重试"
+          : "浏览器无法播放该音频编码，请转换为 MP3、AAC 或 WAV 后重试",
+        true,
+      );
     }
   } else player.pause();
 }
@@ -490,7 +499,7 @@ $("fillBeats").onclick = () => {
     b <= a ||
     b > duration() + 0.01
   ) {
-    toast("请设置有效 BPM（20–400）及视频范围内的起止时间", true);
+    toast("请设置有效 BPM（20–400）及素材范围内的起止时间", true);
     return;
   }
   const beats = state.beats.filter((p) => p.time < a || p.time > b);
@@ -523,7 +532,7 @@ $("applyOffset").onclick = () => {
   const offset = num("offsetMs") / 1000;
   if (!Number.isFinite(offset)) return;
   replaceBeats(state.beats.map((b) => ({ ...b, time: b.time + offset })));
-  toast("已应用偏移，超出视频范围的拍点已移除，可撤销");
+  toast("已应用偏移，超出素材范围的拍点已移除，可撤销");
 };
 $("halfBeats").onclick = () =>
   replaceBeats(state.beats.filter((_, i) => i % 2 === 0));
@@ -708,111 +717,178 @@ function drawOverlay() {
     h = overlay.height;
   ctx.clearRect(0, 0, w, h);
   if (!state.media) return;
-  const s = state.style,
-    bw = w * s.barWidth,
-    left = (w - bw) / 2,
-    y = h * s.position,
-    bh = s.barHeight,
-    mx = s.motion === "meet" ? left + bw / 2 : left + bw * s.marker;
-  ctx.fillStyle = s.barColor;
-  ctx.beginPath();
-  ctx.roundRect(left, y - bh / 2, bw, bh, Math.min(6, bh / 3));
-  ctx.fill();
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(left, y - bh / 2, bw, bh);
-  ctx.clip();
-  ctx.fillStyle = s.color;
-  const time = playhead();
-  for (const b of state.beats) {
-    const delta = b.time - time;
-    if (delta < -0.45 || delta > s.speed) continue;
-    const r = bh * 0.3 * (0.55 + 0.45 * b.strength);
-    let positions;
-    if (s.motion === "meet") {
-      if (delta >= 0) {
-        const progress = 1 - delta / s.speed;
-        positions = [left + r + progress * Math.max(0, mx - left - r), left + bw - r - progress * Math.max(0, left + bw - r - mx)];
-      } else positions = [mx];
-    } else if (s.motion === "left-right") {
-      positions = [mx - (delta / s.speed) * bw * s.marker];
-    } else {
-      positions = [mx + (delta / s.speed) * bw * (1 - s.marker)];
-    }
-    for (const x of positions) {
-      if (x < left - bh || x > left + bw + bh || delta < 0) continue;
-      if (s.pattern === "custom" && customPattern) {
-        const size = r * 2; ctx.drawImage(customPattern, x - size / 2, y - size / 2, size, size);
-      } else {
-        ctx.beginPath();
-        if (s.pattern === "diamond") { ctx.moveTo(x,y-r);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y);ctx.closePath(); }
-        else if (s.pattern === "triangle") { ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x-r,y+r);ctx.closePath(); }
-        else if (s.pattern === "star") { for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,rr=k%2?r*0.46:r,px=x+Math.cos(a)*rr,py=y+Math.sin(a)*rr;if(k===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);}ctx.closePath(); }
-        else if (s.pattern === "pill") ctx.roundRect(x-r,y-r*0.7,r*2,r*1.4,Math.max(1,r*0.7));
-        else ctx.arc(x,y,r,0,Math.PI*2);
-        ctx.fill();
-      }
-    }
-    const age = -delta;
-    if (age >= 0 && age < 0.42 && s.hitEffect !== "none") {
-      const progress=age/0.42,radius=r*(1+progress*3);ctx.globalAlpha=(1-progress)*(s.hitEffect==="ring"?0.85:0.3);ctx.beginPath();ctx.arc(mx,y,radius,0,Math.PI*2);
-      if(s.hitEffect==="ring"){ctx.strokeStyle=s.color;ctx.lineWidth=Math.max(1,bh*0.045);ctx.stroke();}else{ctx.fillStyle=s.color;ctx.fill();}ctx.globalAlpha=1;
-    }
+  if (!state.media.hasVideo && $("previewMode").value === "composite") {
+    ctx.fillStyle = state.style.backgroundColor;
+    ctx.fillRect(0, 0, w, h);
   }
-  ctx.restore();
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(mx - 1, y - bh * 0.7, 2, bh * 1.4);
+  drawTrack(ctx, w, h, state.beats, playhead(), state.style, customPattern);
+}
+const colorKeys = ["color", "secondaryColor", "barColor", "backgroundColor"];
+const percentKeys = ["position", "barWidth", "marker"];
+const numericKeys = [
+  ...percentKeys,
+  "barHeight",
+  "speed",
+  "beatScale",
+  "hitDuration",
+  "effectIntensity",
+];
+function renderStyleChoices() {
+  for (const palette of PALETTES) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.palette = palette.id;
+    button.title = palette.name;
+    button.innerHTML = `<span class="palette-colors"><i></i><i></i><i></i></span><span>${palette.name}</span>`;
+    [palette.color, palette.secondaryColor, palette.backgroundColor].forEach(
+      (color, index) =>
+        (button.querySelectorAll("i")[index].style.background = color),
+    );
+    button.onclick = () => {
+      for (const key of colorKeys) state.style[key] = palette[key];
+      syncStyle();
+    };
+    $("palettes").append(button);
+  }
+  for (const pattern of PATTERNS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.pattern = pattern.id;
+    button.title = pattern.name;
+    button.innerHTML = `<b>${pattern.icon}</b><span>${pattern.name}</span>`;
+    button.onclick = () => {
+      if (pattern.id === "custom" && !customPattern) {
+        $("patternFile").click();
+        return;
+      }
+      state.style.pattern = pattern.id;
+      syncStyle();
+    };
+    $("patternChoices").append(button);
+  }
 }
 function syncStyle() {
-  for (const key of ["color", "barColor"]) $(key).value = state.style[key];
+  for (const key of colorKeys) $(key).value = state.style[key];
   document.documentElement.style.setProperty("--accent", state.style.color);
-  $("pattern").value = state.style.pattern;
-  $("motion").value = state.style.motion;
-  $("hitEffect").value = state.style.hitEffect;
-  $("patternHint").textContent = state.style.patternImage ? "已载入自定义图案；会随项目保存。" : "PNG / JPG / WebP，最大 2 MB；随项目文件保存。";
-  $("patternUploadLabel").textContent = state.style.patternImage ? "更换自定义图案" : "上传自定义图案";
-  for (const key of ["position", "barWidth", "marker"])
-    $(key).value = Math.round(state.style[key] * 100);
-  for (const key of ["barHeight", "speed"]) $(key).value = state.style[key];
-  for (const key of ["position", "barWidth", "marker"])
-    $(key + "Value").value = $(key).value + "%";
-  $("barHeightValue").value = state.style.barHeight + " px";
-  $("speedValue").value = state.style.speed + " 秒";
+  for (const key of ["pattern", "motion", "hitEffect", "colorMode"])
+    $(key).value = state.style[key];
+  $("patternHint").textContent = state.style.patternImage
+    ? "图案已载入，原始比例与透明度会保留，并随项目保存。"
+    : "PNG / JPG / WebP，最大 2 MB、边长 4096 px。";
+  $("patternUploadLabel").textContent = state.style.patternImage
+    ? "更换自定义图案"
+    : "上传自定义图案";
+  $("patternThumbnail").hidden = !state.style.patternImage;
+  if (state.style.patternImage)
+    $("patternThumbnail").src = state.style.patternImage;
+  else $("patternThumbnail").removeAttribute("src");
+  for (const key of numericKeys)
+    $(key).value = percentKeys.includes(key)
+      ? Math.round(state.style[key] * 100)
+      : state.style[key];
+  for (const key of percentKeys) $(key + "Value").value = $(key).value + "%";
+  for (const [key, suffix] of Object.entries({
+    barHeight: " px",
+    speed: " 秒",
+    beatScale: "×",
+    hitDuration: " 秒",
+    effectIntensity: "×",
+  }))
+    $(key + "Value").value = state.style[key] + suffix;
+  const meet = state.style.motion === "meet";
+  $("marker").disabled = meet;
+  $("markerValue").value = meet ? "居中 · 50%" : $("marker").value + "%";
+  $("motionHint").textContent = meet
+    ? "每一拍从两侧同时出发，在中心准时相遇。"
+    : "鼓点到达命中线的瞬间，对应时间轴上的拍点。";
+  $("backgroundField").hidden = !!state.media?.hasVideo;
+  $("hitControls").hidden = state.style.hitEffect === "none";
+  for (const b of document.querySelectorAll("[data-palette]")) {
+    const palette = PALETTES.find((p) => p.id === b.dataset.palette);
+    const selected = colorKeys.every(
+      (key) => palette[key] === state.style[key],
+    );
+    b.classList.toggle("selected", selected);
+    b.setAttribute("aria-pressed", selected);
+  }
+  for (const b of document.querySelectorAll("[data-pattern]")) {
+    const selected = b.dataset.pattern === state.style.pattern;
+    b.classList.toggle("selected", selected);
+    b.setAttribute("aria-pressed", selected);
+  }
   document
     .querySelectorAll("[data-color]")
     .forEach((b) =>
       b.classList.toggle("selected", b.dataset.color === state.style.color),
     );
   drawTimeline();
+  drawOverlay();
 }
-for (const key of ["color", "barColor", "position", "barWidth", "barHeight", "speed", "marker"])
+for (const key of [...colorKeys, ...numericKeys])
   $(key).oninput = () => {
-    state.style[key] = ["color", "barColor"].includes(key)
+    state.style[key] = colorKeys.includes(key)
       ? $(key).value
-      : num(key) / (["position", "barWidth", "marker"].includes(key) ? 100 : 1);
+      : num(key) / (percentKeys.includes(key) ? 100 : 1);
     syncStyle();
   };
-for (const id of ["pattern", "motion", "hitEffect"])
+for (const id of ["pattern", "motion", "hitEffect", "colorMode"])
   $(id).onchange = () => {
-    if (id === "pattern" && $(id).value === "custom" && !state.style.patternImage) {
-      $(id).value = state.style.pattern; toast("请先上传一张自定义图案", true); return;
+    if (id === "pattern" && $(id).value === "custom" && !customPattern) {
+      $(id).value = state.style.pattern;
+      $("patternFile").click();
+      return;
     }
-    state.style[id] = $(id).value; syncStyle();
+    state.style[id] = $(id).value;
+    syncStyle();
   };
+async function loadPattern(data) {
+  if (
+    typeof data !== "string" ||
+    data.length > 2_800_000 ||
+    !/^data:image\/(png|jpeg|webp);base64,/.test(data)
+  )
+    throw Error("自定义图案必须为 2 MB 以内的 PNG、JPG 或 WebP");
+  const image = new Image();
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = () => reject(Error("无法解码图案图片"));
+    image.src = data;
+  });
+  if (
+    !image.naturalWidth ||
+    image.naturalWidth > 4096 ||
+    image.naturalHeight > 4096
+  )
+    throw Error("图片边长不能超过 4096 px");
+  return image;
+}
 $("patternFile").onchange = async (event) => {
   const file = event.target.files[0];
   try {
     if (!file) return;
-    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw Error("请选择 PNG、JPG 或 WebP 图片");
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type))
+      throw Error("请选择 PNG、JPG 或 WebP 图片");
     if (file.size > 2 * 1024 * 1024) throw Error("自定义图案不能超过 2 MB");
-    const data = await new Promise((resolve, reject) => { const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file); });
-    const image = new Image(); await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=data;});
-    if(image.width>4096||image.height>4096)throw Error("图片边长不能超过 4096 px");
-    state.style.patternImage=data;customPattern=image;state.style.pattern="custom";syncStyle();toast("自定义鼓点图案已应用");
-  } catch(error){toast("图案上传失败："+error.message,true);} finally{event.target.value="";}
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(Error("读取图片失败"));
+      reader.readAsDataURL(file);
+    });
+    const image = await loadPattern(data);
+    state.style.patternImage = data;
+    customPattern = image;
+    state.style.pattern = "custom";
+    syncStyle();
+    toast("自定义鼓点图案已应用");
+  } catch (error) {
+    toast("图案上传失败：" + error.message, true);
+  } finally {
+    event.target.value = "";
+  }
 };
 document.querySelectorAll("[data-color]").forEach(
-  (b)
+  (b) =>
     (b.onclick = () => {
       state.style.color = b.dataset.color;
       syncStyle();
@@ -828,8 +904,33 @@ $("previewMode").onchange = () => {
   $("stage").classList.toggle("green", mode === "green");
   $("stage").classList.toggle("transparent", mode === "transparent");
   video.style.opacity = mode === "composite" ? "1" : "0";
+  drawOverlay();
 };
 $("resolution").onchange = resizePreview;
+const demoBeats = Array.from({ length: 10 }, (_, i) => ({
+  time: i * 0.75,
+  strength: [1, 0.65, 0.85, 0.5][i % 4],
+}));
+function drawStyleDemo(now) {
+  const canvas = $("stylePreview"),
+    ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = state.style.backgroundColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const time = matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? 1.5
+    : ((now / 1000) % 3) + 1.5;
+  drawTrack(
+    ctx,
+    canvas.width,
+    canvas.height,
+    demoBeats,
+    time,
+    { ...state.style, position: 0.5, barHeight: 30, barWidth: 0.9 },
+    customPattern,
+  );
+}
+renderStyleChoices();
 function clickSound(strength) {
   if (!audioContext) return;
   const o = audioContext.createOscillator(),
@@ -851,6 +952,7 @@ $("metronome").onchange = async () => {
 let previousPaint = 0;
 function animate(now) {
   drawOverlay();
+  drawStyleDemo(now);
   if (now - previousPaint > 33) {
     $("timeDisplay").innerHTML =
       formatTime(playhead()) +
@@ -994,11 +1096,11 @@ $("beatFile").onchange = async (e) => {
     e.target.value = "";
   }
 };
-function applyProject(p) {
+async function applyProject(p) {
   if (!p || p.version !== 1 || !Array.isArray(p.beats))
     throw Error("不支持的项目格式");
   const style = { ...defaults };
-  for (const key of ["color", "barColor"])
+  for (const key of colorKeys)
     if (/^#[0-9a-f]{6}$/i.test(p.style?.[key])) style[key] = p.style[key];
   const ranges = {
     position: [0.05, 0.95],
@@ -1006,17 +1108,34 @@ function applyProject(p) {
     barHeight: [12, 120],
     speed: [1, 8],
     marker: [0.05, 0.5],
+    hitDuration: [0.15, 1.2],
+    effectIntensity: [0.25, 2],
+    beatScale: [0.5, 1.5],
   };
   for (const [key, [a, b]] of Object.entries(ranges)) {
     const v = Number(p.style?.[key]);
     if (Number.isFinite(v)) style[key] = clamp(v, a, b);
   }
-  if (["circle", "diamond", "triangle", "star", "pill", "custom"].includes(p.style?.pattern)) style.pattern = p.style.pattern;
-  if (["right-left", "left-right", "meet"].includes(p.style?.motion)) style.motion = p.style.motion;
-  if (["ring", "flash", "none"].includes(p.style?.hitEffect)) style.hitEffect = p.style.hitEffect;
-  if (typeof p.style?.patternImage === "string" && p.style.patternImage.length <= 2_800_000 && /^data:image\/(png|jpeg|webp);base64,/.test(p.style.patternImage)) style.patternImage = p.style.patternImage;
-  customPattern = null;
-  if (style.patternImage) { customPattern = new Image(); customPattern.onload = drawOverlay; customPattern.src = style.patternImage; }
+  if (PATTERNS.some((pattern) => pattern.id === p.style?.pattern))
+    style.pattern = p.style.pattern;
+  if (["right-left", "left-right", "meet"].includes(p.style?.motion))
+    style.motion = p.style.motion;
+  if (["ring", "flash", "burst", "none"].includes(p.style?.hitEffect))
+    style.hitEffect = p.style.hitEffect;
+  if (
+    typeof p.style?.patternImage === "string" &&
+    p.style.patternImage.length <= 2_800_000 &&
+    /^data:image\/(png|jpeg|webp);base64,/.test(p.style.patternImage)
+  )
+    style.patternImage = p.style.patternImage;
+  if (["solid", "alternate", "strength"].includes(p.style?.colorMode))
+    style.colorMode = p.style.colorMode;
+  const image = style.patternImage
+    ? await loadPattern(style.patternImage)
+    : null;
+  if (style.pattern === "custom" && !image)
+    throw Error("项目缺少自定义鼓点图案");
+  customPattern = image;
   replaceBeats(p.beats);
   state.style = style;
   syncStyle();
@@ -1042,14 +1161,16 @@ $("projectFile").onchange = async (e) => {
       try {
         const m = await api("/api/media/" + encodeURIComponent(p.media.id));
         setMedia(m);
-        applyProject(p);
+        await applyProject(p);
         return;
       } catch {
         /* source may have been removed */
       }
     }
     state.pendingProject = p;
-    toast("项目已读取，请重新上传项目使用的原视频，上传后将恢复拍点和样式。");
+    toast(
+      "项目已读取，请重新上传项目使用的原音频或视频，上传后将恢复拍点和样式。",
+    );
   } catch (err) {
     toast("项目打开失败：" + err.message, true);
   } finally {
@@ -1136,3 +1257,4 @@ api("/api/health")
   });
 changed();
 resizePreview();
+syncStyle();

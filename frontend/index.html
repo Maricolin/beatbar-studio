@@ -45,7 +45,7 @@
               hidden
             /><span class="upload-icon">↥</span
             ><strong id="uploadTitle">拖入音频或视频，开始创作</strong
-            ><span id="uploadHint">单独上传音乐，或导入带音轨的视频</span
+            ><span id="uploadHint">单独上传音乐，或导入视频</span
             ><small>MP3 · WAV · M4A · MP4 · MOV · WEBM · MKV</small></label
           >
           <div id="mediaInfo" class="media-info" hidden></div>
@@ -93,7 +93,7 @@
           </section>
           <section id="manualPanel" hidden>
             <p class="field-note">
-              播放视频，跟着音乐按
+              播放素材，跟着音乐按
               <kbd>F</kbd> 或下方按钮。开启录制后每次按下都会添加拍点。
             </p>
             <button id="recordBtn" class="full">● 开启打点录制</button
@@ -162,7 +162,11 @@
               <video id="video" playsinline preload="metadata"></video>
               <div id="audioVisual" class="audio-visual" aria-hidden="true">
                 <span class="audio-visual-label">AUDIO SESSION</span>
-                <div class="audio-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <div class="audio-bars">
+                  <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+                  ><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+                  ><i></i><i></i>
+                </div>
                 <span>纯音乐模式 · 节奏画布</span>
               </div>
               <audio id="audio" preload="metadata" hidden></audio>
@@ -173,7 +177,9 @@
                 <p>上传音乐或视频，在这里预览你的 BeatBar</p>
                 <span class="demo-pill">本地处理 · 无需上传云端</span>
               </div>
-              <span class="preview-corner">LIVE PREVIEW</span>
+              <span id="mediaMode" class="preview-media-mode"
+                >音乐 / 视频 · 单文件导入</span
+              ><span class="preview-corner">LIVE PREVIEW</span>
             </div>
             <div class="transport">
               <button id="playBtn" class="play" aria-label="播放或暂停">
@@ -278,10 +284,23 @@
             <h2><span class="section-number">04</span> 视觉样式</h2>
             <span class="tiny-label">DESIGN</span>
           </div>
-          <div class="style-mini">
-            <span></span><i></i><b></b><b></b><b></b>
+          <div class="style-demo">
+            <div><span>样式预演</span><small>实时动效</small></div>
+            <canvas
+              id="stylePreview"
+              width="440"
+              height="140"
+              aria-label="当前鼓点样式动态预览"
+            ></canvas>
           </div>
-          <label class="field-label">色彩主题</label>
+          <label class="field-label">主题色盘</label>
+          <div
+            id="palettes"
+            class="palette-grid"
+            role="group"
+            aria-label="主题色盘"
+          ></div>
+          <label class="field-label">主色快捷选择</label>
           <div class="swatches">
             <button
               style="--swatch: #b7f56c"
@@ -304,8 +323,16 @@
               data-color="#ff9c74"
               aria-label="橙色"
             ></button
-            ><button style="--swatch: #ff6fae" data-color="#ff6fae" aria-label="玫瑰粉"></button
-            ><button style="--swatch: #f7d774" data-color="#f7d774" aria-label="暖金色"></button
+            ><button
+              style="--swatch: #ff6fae"
+              data-color="#ff6fae"
+              aria-label="玫瑰粉"
+            ></button
+            ><button
+              style="--swatch: #f7d774"
+              data-color="#f7d774"
+              aria-label="暖金色"
+            ></button
             ><label title="自定义拍点颜色"
               ><input
                 id="color"
@@ -318,32 +345,105 @@
             <label for="barColor">轨道颜色</label
             ><input id="barColor" type="color" value="#30363e" />
           </div>
+          <div class="color-field">
+            <label for="secondaryColor">辅助色</label
+            ><input id="secondaryColor" type="color" value="#67dce8" />
+          </div>
+          <div id="backgroundField" class="color-field">
+            <label for="backgroundColor">音频画布背景</label
+            ><input id="backgroundColor" type="color" value="#111820" />
+          </div>
+          <label class="field-label" for="colorMode">鼓点配色方式</label>
+          <select id="colorMode">
+            <option value="solid">纯色</option>
+            <option value="alternate">双色交替 · 汇合时左右分色</option>
+            <option value="strength">随强度混色 · 弱拍到强拍</option>
+          </select>
           <label class="field-label" for="pattern">鼓点图案</label>
-          <select id="pattern">
+          <div
+            id="patternChoices"
+            class="pattern-grid"
+            role="group"
+            aria-label="鼓点图案"
+          ></div>
+          <select id="pattern" aria-label="鼓点图案" class="sr-only">
             <option value="circle">圆点</option>
             <option value="diamond">菱形</option>
             <option value="triangle">三角</option>
             <option value="star">星芒</option>
             <option value="pill">胶囊</option>
+            <option value="hexagon">六边形</option>
+            <option value="heart">心形</option>
             <option value="custom">自定义图片</option>
           </select>
           <label class="button quiet full pattern-upload" for="patternFile">
-            <span id="patternUploadLabel">上传自定义图案</span>
-            <input id="patternFile" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <img id="patternThumbnail" alt="自定义图案缩略图" hidden /><span
+              id="patternUploadLabel"
+              >上传自定义图案</span
+            >
+            <input
+              id="patternFile"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              hidden
+            />
           </label>
-          <p id="patternHint" class="field-note pattern-hint">PNG / JPG / WebP，最大 2 MB；随项目文件保存。</p>
+          <p id="patternHint" class="field-note pattern-hint">
+            PNG / JPG / WebP，最大 2 MB；随项目文件保存。
+          </p>
           <label class="field-label" for="motion">鼓点运动</label>
           <select id="motion">
             <option value="right-left">从右侧驶向命中线</option>
             <option value="left-right">从左侧驶向命中线</option>
             <option value="meet">双侧出发，中间汇合</option>
           </select>
+          <p id="motionHint" class="field-note"></p>
           <label class="field-label" for="hitEffect">命中动效</label>
           <select id="hitEffect">
             <option value="ring">涟漪扩散</option>
             <option value="flash">闪光脉冲</option>
+            <option value="burst">粒子爆闪</option>
             <option value="none">关闭动效</option>
           </select>
+          <div id="hitControls">
+            <div class="field-head">
+              <label for="hitDuration">动效时长</label
+              ><output id="hitDurationValue">0.45 秒</output>
+            </div>
+            <input
+              id="hitDuration"
+              type="range"
+              min="0.15"
+              max="1.2"
+              step="0.05"
+              value="0.45"
+            />
+            <div class="field-head">
+              <label for="effectIntensity">动效强度</label
+              ><output id="effectIntensityValue">1×</output>
+            </div>
+            <input
+              id="effectIntensity"
+              type="range"
+              min="0.25"
+              max="2"
+              step="0.05"
+              value="1"
+            />
+          </div>
+          <div class="field-head">
+            <label for="beatScale">鼓点大小</label
+            ><output id="beatScaleValue">1×</output>
+          </div>
+          <input
+            id="beatScale"
+            type="range"
+            min="0.5"
+            max="1.5"
+            step="0.05"
+            value="1"
+          />
+          <div class="divider"></div>
           <div class="field-head">
             <label for="position">垂直位置</label
             ><output id="positionValue">82%</output>
@@ -454,11 +554,7 @@
           >
         </div>
         <label class="check-label"
-          ><input
-            id="includeAudio"
-            type="checkbox"
-            checked
-          />包含源音频</label
+          ><input id="includeAudio" type="checkbox" checked />包含源音频</label
         >
         <p class="field-note">
           透明 WebM 的浏览器播放器可能显示黑底；请在支持 Alpha

@@ -1,10 +1,12 @@
 {
   "name": "beatbar-studio",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
-    "format": "prettier --write frontend",
-    "check": "node --check frontend/app.js && prettier --check frontend"
+    "format": "prettier --write frontend scripts/*.mjs",
+    "check": "node --check frontend/app.js && node --check frontend/visuals.js && prettier --check frontend scripts/*.mjs",
+    "test:browser": "node scripts/browser-test.mjs",
+    "test:visuals": "node scripts/visual-browser-test.mjs"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [
