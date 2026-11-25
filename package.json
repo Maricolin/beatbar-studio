@@ -2,6 +2,7 @@
   "name": "beatbar-studio",
   "private": true,
   "version": "1.1.0",
+  "license": "MIT",
   "scripts": {
     "format": "prettier --write frontend scripts/*.mjs",
     "check": "node --check frontend/app.js && node --check frontend/visuals.js && prettier --check frontend scripts/*.mjs",
