@@ -16,10 +16,15 @@
       <div class="header-actions">
         <span id="connection" class="status-dot">连接中</span
         ><button id="helpBtn" class="quiet">⌘ 快捷键</button
-        ><button id="saveProject">保存项目</button
-        ><label class="button quiet"
-          >打开项目<input id="projectFile" type="file" accept=".json" hidden
-        /></label>
+        ><a
+          id="learningLink"
+          class="button quiet"
+          href="/help.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          >学习教程 ↗</a
+        ><button id="manageProjects">项目库</button
+        ><button id="saveProject">保存项目</button>
       </div>
     </header>
     <main>
@@ -31,6 +36,33 @@
         </div>
         <button class="primary" id="openExport">↗ 导出视频</button>
       </div>
+      <section class="project-bar" aria-label="当前项目">
+        <div class="project-identity">
+          <label for="projectName">当前项目</label>
+          <input
+            id="projectName"
+            type="text"
+            value="未命名项目"
+            maxlength="100"
+            autocomplete="off"
+          />
+          <span id="projectStatus" role="status" aria-live="polite"
+            >可随时保存草稿</span
+          >
+        </div>
+        <div class="project-actions">
+          <button id="newProject">＋ 新建项目</button>
+          <button id="exportProject" class="quiet">导出项目 JSON</button>
+          <label class="button quiet"
+            >导入项目 JSON<input
+              id="projectFile"
+              type="file"
+              accept=".json"
+              hidden
+          /></label>
+        </div>
+      </section>
+      <p id="missingMedia" class="missing-media" role="status" hidden></p>
       <div class="studio-grid">
         <aside class="panel source-panel">
           <div class="panel-heading">
@@ -682,6 +714,66 @@
           开始渲染与导出 ↗
         </button>
       </form>
+    </dialog>
+    <dialog id="projectDialog" aria-labelledby="projectDialogTitle">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">LOCAL PROJECTS</div>
+          <h2 id="projectDialogTitle">项目库</h2>
+        </div>
+        <button id="closeProjects" class="quiet" aria-label="关闭项目库">
+          ✕
+        </button>
+      </div>
+      <p class="field-note">
+        项目保存在本机。打开其他项目或新建前，会先保存当前进度。
+      </p>
+      <div class="project-search">
+        <input
+          id="projectSearch"
+          type="search"
+          placeholder="搜索项目或素材名称"
+          aria-label="搜索项目"
+        /><button id="refreshProjects">刷新列表</button>
+      </div>
+      <p id="projectListMessage" role="status"></p>
+      <div id="projectList" class="project-list"></div>
+    </dialog>
+    <dialog id="newProjectDialog" aria-labelledby="newProjectTitle">
+      <form id="newProjectForm">
+        <div class="dialog-heading">
+          <h2 id="newProjectTitle">新建项目</h2>
+          <button
+            id="cancelNewProject"
+            type="button"
+            class="quiet"
+            aria-label="取消新建"
+          >
+            ✕
+          </button>
+        </div>
+        <label class="field-label" for="newProjectName">项目名称</label
+        ><input
+          id="newProjectName"
+          type="text"
+          maxlength="100"
+          value="未命名项目"
+          required
+        />
+        <p class="field-note">当前进度将先保存，再开始新的创作。</p>
+        <button type="submit" class="primary full">创建项目</button>
+      </form>
+    </dialog>
+    <dialog id="deleteProjectDialog" aria-labelledby="deleteProjectTitle">
+      <div class="dialog-heading">
+        <h2 id="deleteProjectTitle">删除项目</h2>
+      </div>
+      <p id="deleteProjectLabel"></p>
+      <p class="field-note">只删除项目记录，原始音乐和视频仍然保留。</p>
+      <div class="project-actions">
+        <button id="cancelDeleteProject">取消</button
+        ><button id="confirmDeleteProject" class="danger-text">删除项目</button>
+      </div>
     </dialog>
     <dialog id="helpDialog">
       <div class="dialog-heading">

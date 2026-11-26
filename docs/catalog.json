@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "id": "README",
+      "title": "文档与学习中心",
+      "group": "开始使用",
+      "summary": "阅读路线、概念和各章入口",
+      "file": "README.md"
+    },
+    {
+      "id": "quickstart",
+      "title": "五分钟快速上手",
+      "group": "开始使用",
+      "summary": "从示例音频到第一个 MP4",
+      "file": "quickstart.md"
+    },
+    {
+      "id": "guide",
+      "title": "工作台使用手册",
+      "group": "开始使用",
+      "summary": "识别、打点、样式、项目与输出全流程",
+      "file": "guide.md"
+    },
+    {
+      "id": "examples",
+      "title": "配套样例与练习",
+      "group": "动手练习",
+      "summary": "试听 120 BPM 音频，下载三份项目和交换文件",
+      "file": "examples.md"
+    },
+    {
+      "id": "architecture",
+      "title": "项目结构与数据流",
+      "group": "开发参考",
+      "summary": "全部维护目录、模块边界与六条执行链",
+      "file": "architecture.md"
+    },
+    {
+      "id": "frontend",
+      "title": "前端代码逻辑",
+      "group": "开发参考",
+      "summary": "编辑状态、手势、绘制、保存与恢复",
+      "file": "frontend.md"
+    },
+    {
+      "id": "backend",
+      "title": "后端代码逻辑",
+      "group": "开发参考",
+      "summary": "媒体、检测、任务、渲染和持久化",
+      "file": "backend.md"
+    },
+    {
+      "id": "deployment",
+      "title": "部署设备、性能与容量规划",
+      "group": "开发参考",
+      "summary": "运行环境、硬件规划、实测性能与接口部署边界",
+      "file": "deployment.md"
+    },
+    {
+      "id": "api",
+      "title": "API 与数据格式",
+      "group": "开发参考",
+      "summary": "14 个接口、数据模型和可运行调用样例",
+      "file": "api.md"
+    },
+    {
+      "id": "source-index",
+      "title": "源码符号索引",
+      "group": "开发参考",
+      "summary": "按源码 AST 生成的类、函数、路由和行号",
+      "file": "source-index.md"
+    },
+    {
+      "id": "development",
+      "title": "开发、测试与文档维护",
+      "group": "开发参考",
+      "summary": "本地启动、测试分层与文档更新方法",
+      "file": "development.md"
+    }
+  ]
+}

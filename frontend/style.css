@@ -154,6 +154,9 @@ header {
   align-items: center;
   margin-left: auto;
 }
+.header-actions > a {
+  text-decoration: none;
+}
 .status-dot {
   font-size: 11px;
   color: #9fa996;
@@ -1378,4 +1381,126 @@ select:focus-visible {
 #timeline:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+.project-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.project-identity,
+.project-actions,
+.project-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.project-identity {
+  flex: 1;
+}
+.project-identity label {
+  color: var(--muted);
+  font-size: 11px;
+}
+#projectName {
+  width: min(260px, 100%);
+  min-width: 0;
+}
+#projectStatus {
+  font-size: 11px;
+  color: var(--muted);
+}
+#projectStatus[data-state="saved"] {
+  color: #a6c88d;
+}
+#projectStatus[data-state="dirty"],
+.missing-media {
+  color: #efc07a;
+}
+#projectStatus[data-state="error"] {
+  color: #ff9999;
+}
+.missing-media {
+  padding: 12px 16px;
+  border: 1px solid #76603c;
+  border-radius: 8px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+#projectDialog {
+  width: min(760px, calc(100vw - 32px));
+  max-width: 760px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.project-search input {
+  flex: 1;
+  min-width: 140px;
+}
+.project-list {
+  display: grid;
+  gap: 10px;
+}
+.project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.project-row.current {
+  border-color: var(--accent);
+}
+.project-row-info {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  flex: 1 1 230px;
+  overflow-wrap: anywhere;
+}
+.project-row-info small {
+  color: var(--muted);
+  line-height: 1.7;
+}
+.project-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+#newProjectName {
+  width: 100%;
+}
+@media (max-width: 650px) {
+  .project-bar {
+    padding: 12px;
+  }
+  .project-identity {
+    flex-wrap: wrap;
+    flex-basis: 100%;
+  }
+  .project-actions {
+    gap: 5px;
+  }
+  .project-actions button,
+  .project-actions .button {
+    padding: 8px;
+    font-size: 11px;
+  }
+  #projectStatus {
+    flex-basis: 100%;
+  }
+  .project-row-actions {
+    width: 100%;
+  }
 }

@@ -205,7 +205,7 @@ try {
   await evaluate(
     `(() => {const original=URL.createObjectURL;window.__savedProject=null;window.__restoreObjectURL=()=>{URL.createObjectURL=original};URL.createObjectURL=function(blob){if(blob.type==='application/json')blob.text().then(text=>window.__savedProject=JSON.parse(text));return original.call(this,blob)}})()`,
   );
-  await click("#saveProject");
+  await click("#exportProject");
   await until("window.__savedProject!==null");
   const saved = await evaluate("window.__savedProject");
   await evaluate(

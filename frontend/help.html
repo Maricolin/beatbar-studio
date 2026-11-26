@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="BeatBar Studio 使用教程、可下载练习、前后端逻辑与 API 开发参考。"
+    />
+    <title>BeatBar 学习中心</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/help.css" />
+    <script type="module" src="/help.js"></script>
+  </head>
+  <body class="help-page">
+    <a class="skip-link" href="#article">跳到正文</a>
+    <header>
+      <a class="brand" href="/" aria-label="BeatBar 工作台"
+        ><span class="brand-icon">▥</span> BeatBar<span class="brand-light"
+          >STUDIO</span
+        ></a
+      >
+      <span class="workspace-label">学习中心</span>
+      <div class="header-actions">
+        <a class="button quiet" href="/">打开工作台 ↗</a>
+      </div>
+    </header>
+    <div class="help-layout" id="helpLayout" data-menu="closed">
+      <aside class="docs-sidebar" aria-label="学习导航">
+        <div class="docs-sidebar-heading">
+          <strong>从第一拍到读懂代码</strong
+          ><button
+            id="toggleDocsNav"
+            class="quiet"
+            aria-expanded="false"
+            aria-controls="docsNav"
+            type="button"
+          >
+            章节目录
+          </button>
+        </div>
+        <label class="sr-only" for="docSearch">搜索全部文档</label>
+        <div class="docs-search">
+          <input
+            id="docSearch"
+            type="search"
+            placeholder="搜索全文或函数名 /"
+            autocomplete="off"
+          /><button
+            id="clearSearch"
+            class="quiet"
+            type="button"
+            aria-label="清空搜索"
+          >
+            ×
+          </button>
+        </div>
+        <nav id="docsNav" aria-label="文档章节"></nav>
+        <p class="docs-local-note">
+          文档随应用本地提供<br />练习文件下载后手动导入
+        </p>
+      </aside>
+      <main class="docs-main" id="docsMain">
+        <div class="eyebrow">BEATBAR · LEARN & BUILD</div>
+        <p id="docStatus" role="status" aria-live="polite">正在读取学习资料…</p>
+        <button id="retryDoc" type="button" hidden>重新加载</button>
+        <div class="article-tools" id="articleTools">
+          <p id="docSummary"></p>
+          <a id="rawDocument" class="button quiet" download
+            >下载本章 Markdown ↓</a
+          >
+        </div>
+        <section id="searchResults" aria-label="全文搜索结果" hidden>
+          <h1>搜索结果</h1>
+          <p id="searchNote" role="status" aria-live="polite"></p>
+          <div id="searchList"></div>
+        </section>
+        <details id="articleToc" class="article-toc">
+          <summary>本页目录</summary>
+          <nav id="tocList" aria-label="本页目录"></nav>
+        </details>
+        <section
+          id="examplePanel"
+          class="example-panel"
+          aria-label="可下载练习"
+          hidden
+        >
+          <h2>先听一听，再动手</h2>
+          <p>
+            8 秒 · 120 BPM · 16 次脉冲。下载一份项目
+            JSON，在工作台导入，再上传同一段练习音频。
+          </p>
+          <audio
+            id="sampleAudio"
+            controls
+            preload="none"
+            aria-label="120 BPM 合成练习音频"
+          ></audio>
+          <a id="downloadAudio" class="button" download="beatbar-120.wav"
+            >下载练习音频 ↓</a
+          >
+          <div id="exampleCards" class="example-cards"></div>
+          <p id="exampleNote" class="muted">
+            下载不会覆盖当前项目；导入前可先保存自己的作品。
+          </p>
+        </section>
+        <article
+          id="article"
+          class="markdown-body"
+          tabindex="-1"
+          aria-label="文档正文"
+        ></article>
+        <noscript
+          ><p>
+            网页阅读需要 JavaScript。可直接打开项目 docs 目录中的 Markdown
+            文档。
+          </p></noscript
+        >
+        <footer class="docs-footer">
+          教程正文与仓库 docs 目录保持同源 ·
+          <a href="/docs" target="_blank" rel="noopener noreferrer"
+            >交互式 API 文档 ↗</a
+          >
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

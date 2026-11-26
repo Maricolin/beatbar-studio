@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "media": null,
+  "beats": [
+    {
+      "time": 0.25,
+      "strength": 0.95
+    },
+    {
+      "time": 1.25,
+      "strength": 0.7
+    },
+    {
+      "time": 2.25,
+      "strength": 0.95
+    },
+    {
+      "time": 3.25,
+      "strength": 0.7
+    },
+    {
+      "time": 4.25,
+      "strength": 0.95
+    },
+    {
+      "time": 5.25,
+      "strength": 0.7
+    },
+    {
+      "time": 6.25,
+      "strength": 0.95
+    },
+    {
+      "time": 7.25,
+      "strength": 0.7
+    }
+  ],
+  "style": {
+    "color": "#b7f56c",
+    "secondaryColor": "#67dce8",
+    "barColor": "#30363e",
+    "backgroundColor": "#111820",
+    "colorMode": "solid",
+    "position": 0.82,
+    "barWidth": 0.8,
+    "barHeight": 44,
+    "speed": 2,
+    "marker": 0.15,
+    "pattern": "diamond",
+    "motion": "right-left",
+    "hitEffect": "ring",
+    "hitDuration": 0.45,
+    "effectIntensity": 1,
+    "beatScale": 1,
+    "trackType": "classic",
+    "markerPattern": "line",
+    "markerColor": "#ffffff",
+    "markerScale": 1,
+    "dbFloor": -48,
+    "dbCeiling": -6
+  },
+  "bpm": 60,
+  "exportSettings": {
+    "filename": "隔拍绿幕轨道",
+    "resolution": "640x360",
+    "fps": 24,
+    "mode": "green",
+    "includeAudio": true
+  },
+  "editorSettings": {
+    "inputs": {
+      "fillStart": "0.25",
+      "fillEnd": "7.75",
+      "sensitivity": "55",
+      "minInterval": "0.20",
+      "band": "40,3000",
+      "analysisMode": "onsets",
+      "previewMode": "green"
+    },
+    "tab": "auto",
+    "playhead": 0,
+    "zoom": 1,
+    "scrollLeft": 0,
+    "selected": -1
+  }
+}

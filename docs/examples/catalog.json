@@ -1,0 +1,32 @@
+{
+  "audio": "beatbar-120.wav",
+  "duration": 8,
+  "bpm": 120,
+  "beatCount": 16,
+  "examples": [
+    {
+      "id": "classic-120",
+      "title": "经典双色轨道",
+      "summary": "16 拍 · 120 BPM · 圆点双色交替",
+      "file": "classic-120.json",
+      "beatCount": 16,
+      "bpm": 120
+    },
+    {
+      "id": "converge-120",
+      "title": "双侧汇合与命中标记",
+      "summary": "16 拍 · 120 BPM · 两侧竖线汇合",
+      "file": "converge-120.json",
+      "beatCount": 16,
+      "bpm": 120
+    },
+    {
+      "id": "green-half-time",
+      "title": "隔拍绿幕轨道",
+      "summary": "8 拍 · 60 BPM · 用于剪辑抠像叠加",
+      "file": "green-half-time.json",
+      "beatCount": 8,
+      "bpm": 60
+    }
+  ]
+}

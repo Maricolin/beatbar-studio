@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 from urllib.parse import quote
 from backend.detection import detect_beats
+from backend.projects import create_router as create_projects_router
 from pydantic import BaseModel, Field, field_validator, model_validator
 from scipy.signal import butter, find_peaks, sosfiltfilt, stft
 
@@ -45,6 +46,7 @@ AUDIO_RATE = 22_050
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 app = FastAPI(title="BeatBar backend", version="1.0.0")
+app.include_router(create_projects_router(lambda: DATA_ROOT))
 
 @dataclass
 class Media:
@@ -911,6 +913,10 @@ def download_export(filename: str, downloadName: str | None = None, range_header
             raise HTTPException(status_code=422, detail="文件扩展名与视频格式不一致。")
     return _range_response(path, range_header, media_type, name)
 
+
+learning = ROOT / "docs"
+if learning.is_dir():
+    app.mount("/learning", StaticFiles(directory=learning), name="learning")
 
 frontend = ROOT / "frontend"
 if frontend.is_dir():

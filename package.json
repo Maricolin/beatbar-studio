@@ -6,8 +6,13 @@
   "license": "MIT",
   "scripts": {
     "format": "prettier --write frontend scripts/*.mjs",
-    "check": "node --check frontend/app.js && node --check frontend/visuals.js && node --check frontend/timeline.js && node --check frontend/export.js && prettier --check frontend scripts/*.mjs",
-    "test:unit": "node scripts/studio-unit-test.mjs",
+    "check": "node --check frontend/app.js && node --check frontend/visuals.js && node --check frontend/timeline.js && node --check frontend/export.js && node --check frontend/projects.js && node --check frontend/help.js && node --check frontend/markdown.js && prettier --check frontend scripts/*.mjs",
+    "test:unit": "node scripts/studio-unit-test.mjs && node scripts/help-unit-test.mjs",
+    "test:help-unit": "node scripts/help-unit-test.mjs",
+    "test:projects": "node --test scripts/project-manager-test.mjs",
+    "test:docs": "node scripts/test-docs.mjs",
+    "test:help-browser": "node scripts/help-browser-test.mjs",
+    "test:project-browser": "node scripts/project-browser-test.mjs",
     "test:studio": "node scripts/studio-browser-test.mjs",
     "test:browser": "node scripts/browser-test.mjs",
     "test:visuals": "node scripts/visual-browser-test.mjs"

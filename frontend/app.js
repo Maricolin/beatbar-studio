@@ -1,6 +1,7 @@
 import { DEFAULT_STYLE, PALETTES, PATTERNS, drawTrack } from "./visuals.js";
 import { createTimeline } from "./timeline.js";
 import { exportFilename, createExportDestination } from "./export.js";
+import { createProjectManager } from "./projects.js";
 
 const $ = (id) => document.getElementById(id);
 const video = $("video"),
@@ -22,6 +23,7 @@ const state = {
   uploading: false,
   pendingProject: null,
 };
+let projectManager;
 let toastTimer,
   customPattern = null,
   customMarker = null,
@@ -54,16 +56,18 @@ async function api(path, body) {
     } catch {
       d = { detail: r.statusText };
     }
-    throw Error(
+    const error = Error(
       typeof d.detail === "string" ? d.detail : JSON.stringify(d.detail || d),
     );
+    error.status = r.status;
+    throw error;
   }
   return r.json();
 }
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const num = (id) => Number($(id).value);
 function duration() {
-  return state.media?.duration || 10;
+  return state.media?.duration || state.pendingProject?.media?.duration || 10;
 }
 function playhead() {
   return (state.media?.hasVideo ? video : audio).currentTime || 0;
@@ -136,6 +140,7 @@ function changed() {
   $("redo").disabled = !state.future.length;
   updateSelection();
   drawTimeline();
+  projectManager?.changed();
 }
 function replaceBeats(beats) {
   const validated = normalize(beats);
@@ -202,6 +207,7 @@ function seek(t) {
   playbackElement().currentTime = clamp(t, 0, duration());
   lastTime = playhead();
   drawTimeline();
+  projectManager?.changed();
 }
 function updateBusy() {
   for (const id of [
@@ -210,6 +216,11 @@ function updateBusy() {
     "openExport",
     "videoFile",
     "projectFile",
+    "saveProject",
+    "newProject",
+    "manageProjects",
+    "exportProject",
+    "projectName",
   ])
     $(id).disabled = state.busy || state.uploading;
   for (const cls of ["source-panel", "style-panel", "timeline-panel"])
@@ -230,17 +241,20 @@ async function upload(file) {
     const body = new FormData();
     body.append("file", file);
     const m = await api("/api/media", body);
-    setMedia(m);
+    const pending = state.pendingProject ? project() : null;
+    if (pending) {
+      const prepared = await prepareProject(
+        { ...pending, media: { id: m.id, name: m.name, duration: m.duration } },
+        m,
+      );
+      restoreProject(prepared);
+    } else setMedia(m);
+    projectManager?.changed();
     toast(
       (m.hasVideo ? "视频" : "音乐") +
         "已就绪" +
         (m.hasAudio ? "，可以开始识别音乐" : "；没有音轨，可以手动打点"),
     );
-    if (state.pendingProject) {
-      const p = state.pendingProject;
-      state.pendingProject = null;
-      await applyProject(p);
-    }
   } catch (e) {
     toast("导入失败：" + e.message, true);
     $("uploadTitle").textContent = "拖入音频或视频，开始创作";
@@ -253,6 +267,8 @@ async function upload(file) {
 }
 function setMedia(m) {
   state.media = m;
+  state.pendingProject = null;
+  $("missingMedia").hidden = true;
   state.beats = [];
   state.past = [];
   state.future = [];
@@ -276,6 +292,7 @@ function setMedia(m) {
   $("stage").classList.add("has-media");
   $("emptyPreview").hidden = true;
   $("uploadTitle").textContent = m.name;
+  $("uploadHint").textContent = "点击可更换音频或视频";
   $("mediaInfo").hidden = false;
   $("mediaInfo").textContent =
     (m.hasVideo ? m.width + " × " + m.height : "纯音频") +
@@ -563,6 +580,7 @@ const timelineEditor = createTimeline({
   getSelected: () => state.selected,
   setSelected: (i) => {
     state.selected = i;
+    projectManager?.changed();
   },
   checkpoint,
   changed,
@@ -578,6 +596,7 @@ const timelineEditor = createTimeline({
   onZoom: (value) => {
     $("zoomLabel").textContent = value.toFixed(1).replace(".0", "") + "×";
     state.zoom = value;
+    projectManager?.changed();
   },
 });
 function drawTimeline() {
@@ -760,6 +779,7 @@ function syncStyle() {
     );
   drawTimeline();
   drawOverlay();
+  projectManager?.changed();
 }
 for (const key of [...colorKeys, ...numericKeys])
   $(key).oninput = () => {
@@ -830,8 +850,10 @@ for (const id of ["dbFloor", "dbCeiling"])
   };
 async function uploadPattern(event, marker = false) {
   const file = event.target.files[0];
+  if (!file || state.busy || state.uploading) return;
+  state.uploading = true;
+  updateBusy();
   try {
-    if (!file) return;
     if (!/^image\/(png|jpeg|webp)$/.test(file.type))
       throw Error("请选择 PNG、JPG 或 WebP 图片");
     if (file.size > 2 * 1024 * 1024) throw Error("自定义图案不能超过 2 MB");
@@ -857,6 +879,8 @@ async function uploadPattern(event, marker = false) {
     toast("图案上传失败：" + error.message, true);
   } finally {
     event.target.value = "";
+    state.uploading = false;
+    updateBusy();
   }
 }
 $("patternFile").onchange = (event) => uploadPattern(event);
@@ -1060,7 +1084,7 @@ function project() {
           name: state.media.name,
           duration: state.media.duration,
         }
-      : null,
+      : state.pendingProject?.media || null,
     beats: snapshot(),
     style: { ...state.style },
     bpm: num("bpm"),
@@ -1068,12 +1092,33 @@ function project() {
       filename: $("exportName").value,
       resolution: $("resolution").value,
       fps: num("fps"),
+      mode: document.querySelector("input[name=mode]:checked").value,
+      includeAudio: state.pendingProject
+        ? state.pendingProject.exportSettings?.includeAudio !== false
+        : $("includeAudio").checked,
+    },
+    editorSettings: {
+      inputs: Object.fromEntries(
+        projectInputIds.map((id) => [
+          id,
+          $(id).type === "checkbox" ? $(id).checked : $(id).value,
+        ]),
+      ),
+      tab: document.querySelector("#inputTabs .active").dataset.tab,
+      playhead: state.media
+        ? playhead()
+        : state.pendingProject?.editorSettings?.playhead || 0,
+      zoom: timelineEditor.getZoom(),
+      scrollLeft: $("timelineScroll").scrollLeft,
+      selected: state.selected,
     },
   };
 }
-$("saveProject").onclick = () => {
-  if (requireMedia()) download(project(), "beatbar-project.json");
-};
+$("exportProject").onclick = () =>
+  download(
+    project(),
+    ($("projectName").value.trim() || "beatbar-project") + ".json",
+  );
 $("exportBeats").onclick = () =>
   download({ version: 1, beats: snapshot() }, "beatbar-beats.json");
 $("exportFunscript").onclick = () => {
@@ -1123,9 +1168,13 @@ $("beatFile").onchange = async (e) => {
     e.target.value = "";
   }
 };
-async function applyProject(p) {
+async function prepareProject(p, knownMedia) {
   if (!p || p.version !== 1 || !Array.isArray(p.beats))
     throw Error("不支持的项目格式");
+  const beats = normalize(
+    p.beats,
+    Number.isFinite(p.media?.duration) ? p.media.duration : 1200,
+  );
   const style = { ...defaults };
   for (const key of colorKeys)
     if (/^#[0-9a-f]{6}$/i.test(p.style?.[key])) style[key] = p.style[key];
@@ -1183,14 +1232,89 @@ async function applyProject(p) {
     : null;
   if (style.pattern === "custom" && !image)
     throw Error("项目缺少自定义鼓点图案");
+  let media = knownMedia || null;
+  if (!media && p.media?.id) {
+    try {
+      media = await api("/api/media/" + encodeURIComponent(p.media.id));
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  return { p, style, image, markerImage, beats, media };
+}
+const projectInputIds = [
+  "sensitivity",
+  "band",
+  "minInterval",
+  "analysisMode",
+  "latency",
+  "fillStart",
+  "fillEnd",
+  "offsetMs",
+  "playbackRate",
+  "metronome",
+  "snapTimeline",
+  "followTimeline",
+  "previewMode",
+];
+const initialProjectInputs = Object.fromEntries(
+  projectInputIds.map((id) => [
+    id,
+    $(id).type === "checkbox" ? $(id).checked : $(id).value,
+  ]),
+);
+function clearMedia() {
+  pausePlayback();
+  state.media = null;
+  state.pendingProject = null;
+  for (const player of [video, audio]) {
+    player.removeAttribute("src");
+    player.load();
+  }
+  $("stage").classList.remove("has-media", "audio-only");
+  $("emptyPreview").hidden = false;
+  $("mediaInfo").hidden = true;
+  $("uploadTitle").textContent = "拖入音频或视频，开始创作";
+  $("uploadHint").textContent = "单独上传音乐，或导入视频";
+  $("mediaMode").textContent = "音乐 / 视频 · 单文件导入";
+  $("missingMedia").hidden = true;
+  $("includeAudio").disabled = true;
+  $("includeAudio").checked = false;
+  timelineEditor.reset();
+}
+function restoreProject({ p, style, image, markerImage, beats, media }) {
+  pausePlayback();
+  if (media) setMedia(media);
+  else {
+    clearMedia();
+    state.pendingProject = p;
+    if (p.media) {
+      $("missingMedia").textContent =
+        "找不到原素材「" +
+        (p.media.name || "未命名素材") +
+        "」。拍点和样式已保留，请在“媒体与节奏”中上传原素材以继续编辑和预览。";
+      $("missingMedia").hidden = false;
+      $("uploadHint").textContent = "请重新关联原音频或视频";
+    }
+  }
   customPattern = image;
   customMarker = markerImage;
-  replaceBeats(p.beats);
+  state.beats = beats;
+  state.past = [];
+  state.future = [];
+  state.selected = -1;
+  state.recording = false;
+  updateRecord();
   state.style = style;
-  syncStyle();
-  if (Number.isFinite(p.bpm)) $("bpm").value = clamp(p.bpm, 20, 400);
-  if (typeof p.exportSettings?.filename === "string")
-    $("exportName").value = p.exportSettings.filename.slice(0, 100);
+  $("bpm").value = Number.isFinite(p.bpm) ? clamp(p.bpm, 20, 400) : 120;
+  $("resolution").value = "source";
+  $("fps").value = "30";
+  $("exportName").value =
+    typeof p.exportSettings?.filename === "string"
+      ? p.exportSettings.filename.slice(0, 100)
+      : media
+        ? media.name.replace(/\.[^.]+$/, "") + "-beatbar"
+        : "beatbar";
   if (
     [...$("resolution").options].some(
       (o) => o.value === p.exportSettings?.resolution,
@@ -1199,44 +1323,89 @@ async function applyProject(p) {
     $("resolution").value = p.exportSettings.resolution;
   if ([24, 30, 60].includes(p.exportSettings?.fps))
     $("fps").value = p.exportSettings.fps;
+  const mode = ["composite", "green", "transparent"].includes(
+    p.exportSettings?.mode,
+  )
+    ? p.exportSettings.mode
+    : "composite";
+  document.querySelector(`input[name=mode][value="${mode}"]`).checked = true;
+  $("includeAudio").checked =
+    !!media?.hasAudio && p.exportSettings?.includeAudio !== false;
+  for (const id of projectInputIds) {
+    const input = $(id),
+      value =
+        p.editorSettings?.inputs?.[id] ??
+        (id === "fillEnd"
+          ? media?.duration || p.media?.duration || 10
+          : initialProjectInputs[id]);
+    if (input.type === "checkbox")
+      input.checked =
+        typeof value === "boolean" ? value : initialProjectInputs[id];
+    else if (input.tagName === "SELECT")
+      input.value = [...input.options].some((o) => o.value === String(value))
+        ? String(value)
+        : initialProjectInputs[id];
+    else if (Number.isFinite(Number(value)))
+      input.value = clamp(
+        Number(value),
+        input.min === "" ? -Infinity : Number(input.min),
+        Math.min(
+          input.max === "" ? Infinity : Number(input.max),
+          id === "fillEnd" && media ? media.duration : Infinity,
+        ),
+      );
+    else input.value = initialProjectInputs[id];
+  }
+  $("sensitivityValue").value = $("sensitivity").value;
+  const tab = p.editorSettings?.tab === "manual" ? "manual" : "auto";
+  for (const button of $("inputTabs").children)
+    button.classList.toggle("active", button.dataset.tab === tab);
+  $("autoPanel").hidden = tab !== "auto";
+  $("manualPanel").hidden = tab !== "manual";
+  video.playbackRate = audio.playbackRate = num("playbackRate");
+  $("previewMode").onchange();
+  timelineEditor.setSnap($("snapTimeline").checked);
+  timelineEditor.setFollow($("followTimeline").checked);
+  timelineEditor.zoom(
+    Number.isFinite(p.editorSettings?.zoom) ? p.editorSettings.zoom : 1,
+  );
+  $("timelineScroll").scrollLeft = Number.isFinite(p.editorSettings?.scrollLeft)
+    ? Math.max(0, p.editorSettings.scrollLeft)
+    : 0;
+  if (Number.isInteger(p.editorSettings?.selected))
+    state.selected = clamp(p.editorSettings.selected, -1, beats.length - 1);
+  if (media) {
+    const player = playbackElement(),
+      time = clamp(Number(p.editorSettings?.playhead) || 0, 0, media.duration);
+    if (player.readyState >= 1) player.currentTime = time;
+    else
+      player.addEventListener(
+        "loadedmetadata",
+        () => {
+          if (state.media === media) {
+            player.currentTime = time;
+            drawTimeline();
+          }
+        },
+        { once: true },
+      );
+  }
+  changed();
+  syncStyle();
   updateExportName();
   resizePreview();
-  toast("项目已恢复");
 }
 $("projectFile").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file || state.busy || state.uploading) return;
-  state.uploading = true;
-  state.pendingProject = null;
-  pausePlayback();
-  updateBusy();
   try {
-    const p = await parseFile(file);
-    if (p.version !== 1 || !Array.isArray(p.beats))
-      throw Error("不支持的项目格式");
-    normalize(
-      p.beats,
-      Number.isFinite(p.media?.duration) ? p.media.duration : Infinity,
+    await projectManager.importProject(
+      parseFile(file),
+      file.name.replace(/\.json$/i, ""),
     );
-    if (p.media?.id) {
-      try {
-        const m = await api("/api/media/" + encodeURIComponent(p.media.id));
-        setMedia(m);
-        await applyProject(p);
-        return;
-      } catch {
-        /* source may have been removed */
-      }
-    }
-    state.pendingProject = p;
-    toast(
-      "项目已读取，请重新上传项目使用的原音频或视频，上传后将恢复拍点和样式。",
-    );
-  } catch (err) {
-    toast("项目打开失败：" + err.message, true);
+  } catch (error) {
+    toast("项目打开失败：" + error.message, true);
   } finally {
-    state.uploading = false;
-    updateBusy();
     e.target.value = "";
   }
 };
@@ -1247,6 +1416,13 @@ document.addEventListener("keydown", (e) => {
   const input =
     ["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName) ||
     e.target.isContentEditable;
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    if (!state.busy && !state.uploading && !projectManager?.isSwitching())
+      $("saveProject").click();
+    return;
+  }
   if (
     input ||
     state.busy ||
@@ -1254,12 +1430,6 @@ document.addEventListener("keydown", (e) => {
     document.querySelector("dialog[open]")
   )
     return;
-  const ctrl = e.ctrlKey || e.metaKey;
-  if (ctrl && e.key.toLowerCase() === "s") {
-    e.preventDefault();
-    $("saveProject").click();
-    return;
-  }
   if (ctrl && e.key.toLowerCase() === "z") {
     e.preventDefault();
     e.shiftKey ? redo() : undo();
@@ -1299,7 +1469,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 window.addEventListener("beforeunload", (e) => {
-  if (state.beats.length) {
+  if (projectManager?.hasUnsavedChanges() || state.busy || state.uploading) {
     e.preventDefault();
     e.returnValue = "";
   }
@@ -1319,3 +1489,45 @@ api("/api/health")
 changed();
 resizePreview();
 syncStyle();
+
+projectManager = createProjectManager({
+  capture: project,
+  prepare: prepareProject,
+  restore: restoreProject,
+  isBusy: () => state.busy || state.uploading,
+  setLoading: (value) => {
+    state.uploading = value;
+    pausePlayback();
+    updateBusy();
+  },
+  toast,
+});
+for (const event of ["input", "change"])
+  document.addEventListener(event, (e) => {
+    if (
+      e.target.closest(".studio-grid, #exportDialog") &&
+      e.target.id !== "saveLocation" &&
+      e.target.type !== "file"
+    )
+      projectManager.changed();
+  });
+$("inputTabs").addEventListener("click", () => projectManager.changed());
+for (const player of [video, audio])
+  player.addEventListener("pause", () => projectManager.changed());
+document.addEventListener("visibilitychange", () => {
+  if (
+    document.visibilityState === "hidden" &&
+    projectManager.hasUnsavedChanges() &&
+    !state.uploading &&
+    !state.busy
+  )
+    projectManager.save({ silent: true }).catch(() => {});
+});
+$("timelineScroll").addEventListener(
+  "scroll",
+  () => {
+    if (playbackElement().paused) projectManager.changed();
+  },
+  { passive: true },
+);
+projectManager.init();

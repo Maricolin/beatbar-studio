@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "beats": [
+    {
+      "time": 0.25,
+      "strength": 0.95
+    },
+    {
+      "time": 0.75,
+      "strength": 0.4
+    },
+    {
+      "time": 1.25,
+      "strength": 0.7
+    },
+    {
+      "time": 1.75,
+      "strength": 0.4
+    },
+    {
+      "time": 2.25,
+      "strength": 0.95
+    },
+    {
+      "time": 2.75,
+      "strength": 0.4
+    },
+    {
+      "time": 3.25,
+      "strength": 0.7
+    },
+    {
+      "time": 3.75,
+      "strength": 0.4
+    },
+    {
+      "time": 4.25,
+      "strength": 0.95
+    },
+    {
+      "time": 4.75,
+      "strength": 0.4
+    },
+    {
+      "time": 5.25,
+      "strength": 0.7
+    },
+    {
+      "time": 5.75,
+      "strength": 0.4
+    },
+    {
+      "time": 6.25,
+      "strength": 0.95
+    },
+    {
+      "time": 6.75,
+      "strength": 0.4
+    },
+    {
+      "time": 7.25,
+      "strength": 0.7
+    },
+    {
+      "time": 7.75,
+      "strength": 0.4
+    }
+  ]
+}
